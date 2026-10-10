@@ -1,0 +1,9 @@
+name = "face-key"
+main = "src/index.mjs"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Your Firebase project id (console -> Project settings). Not secret.
+FIREBASE_PROJECT_ID = "encrypted-verification"
+
+# Secret (NOT here):  wrangler secret put MASTER_KEY

@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'camera_capture.dart';
 import 'recognition/face_auth_service.dart';
 
 class AuthDemo extends StatefulWidget {
@@ -15,10 +15,11 @@ class _AuthDemoState extends State<AuthDemo> {
   String _log = '';
   bool _busy = false;
 
-  // Still photos via the OS camera. No live preview => no liveness possible here.
-  Future<Uint8List?> _shot() async => (await ImagePicker().pickImage(
-          source: ImageSource.camera, preferredCameraDevice: CameraDevice.front))
-      ?.readAsBytes();
+  // Live in-app camera preview (front camera); returns the captured JPEG.
+  Future<Uint8List?> _shot() async {
+    if (!mounted) return null;
+    return captureFromCamera(context, front: true);
+  }
 
   Future<void> _run(Future<String> Function() job) async {
     setState(() { _busy = true; _log = 'Working...'; });

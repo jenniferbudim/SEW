@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "232168707337",
+    "project_id": "encrypted-verification",
+    "storage_bucket": "encrypted-verification.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:232168707337:android:c359a8ecb5d886a5582fd8",
+        "android_client_info": {
+          "package_name": "com.example.face_privacy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDmyPz6MWmN1XM64K_0Rlvgmmow_7IG_qw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
