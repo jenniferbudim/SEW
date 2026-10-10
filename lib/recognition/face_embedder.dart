@@ -15,6 +15,7 @@ class TfliteFaceEmbedder {
       {this.mean = 127.5, this.std = 127.5, this.bgr = false, int threads = 2})
       : _interp = Interpreter.fromBuffer(model, options: InterpreterOptions()..threads = threads) {
     final s = _interp.getInputTensor(0).shape;
+    _batch = s[0]; // the MobileFaceNet file we ship has a FIXED batch of 2: feed the chip twice, use row 0
     _nchw = s[1] == 3 && s[3] != 3;
     final size = _nchw ? s[2] : s[1];
     if (size != kChipSize) {
@@ -26,26 +27,32 @@ class TfliteFaceEmbedder {
   final double mean, std;
   final bool bgr;
   late final bool _nchw;
+  late final int _batch;
 
   Float32List embed(Uint8List chipRgb) {
     const plane = kChipSize * kChipSize;
-    final blob = Float32List(plane * 3);
+    final one = Float32List(plane * 3);
+    final blob = Float32List(plane * 3 * _batch);
     for (var i = 0; i < plane; i++) {
       final r = chipRgb[i * 3], g = chipRgb[i * 3 + 1], b = chipRgb[i * 3 + 2];
       final c0 = bgr ? b : r, c2 = bgr ? r : b;
       if (_nchw) {
-        blob[i] = (c0 - mean) / std;
-        blob[plane + i] = (g - mean) / std;
-        blob[2 * plane + i] = (c2 - mean) / std;
+        one[i] = (c0 - mean) / std;
+        one[plane + i] = (g - mean) / std;
+        one[2 * plane + i] = (c2 - mean) / std;
       } else {
-        blob[i * 3] = (c0 - mean) / std;
-        blob[i * 3 + 1] = (g - mean) / std;
-        blob[i * 3 + 2] = (c2 - mean) / std;
+        one[i * 3] = (c0 - mean) / std;
+        one[i * 3 + 1] = (g - mean) / std;
+        one[i * 3 + 2] = (c2 - mean) / std;
       }
+    }
+    for (var b = 0; b < _batch; b++) {
+      blob.setRange(b * one.length, (b + 1) * one.length, one);
     }
     _interp.getInputTensor(0).data = blob.buffer.asUint8List();
     _interp.invoke();
-    final v = Uint8List.fromList(_interp.getOutputTensor(0).data).buffer.asFloat32List();
+    final all = Uint8List.fromList(_interp.getOutputTensor(0).data).buffer.asFloat32List();
+    final v = Float32List.sublistView(all, 0, all.length ~/ _batch); // first row
     var n = 0.0;
     for (final x in v) {
       n += x * x;

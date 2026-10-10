@@ -2,11 +2,13 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:math' as math;
 import 'camera_capture.dart';
 import 'cloud/key_service.dart';
 import 'cloud/firestore_face_store.dart';
 import 'face_config.dart';
 import 'recognition/face_auth_service.dart';
+import 'protect_demo.dart';
 import 'recognition/liveness.dart';
 
 /// Builds the face service with the user's data key from the key service (Worker or Cloud KMS) and the encrypted
@@ -36,6 +38,21 @@ class CloudGate extends StatelessWidget {
           }
           final u = s.data;
           return u == null ? const SignInPage() : FaceHome(user: u);
+        },
+      );
+}
+
+/// Photo encryption needs a signed-in user (their cloud key is the secret).
+class ProtectGate extends StatelessWidget {
+  const ProtectGate({super.key});
+  @override
+  Widget build(BuildContext context) => StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (c, s) {
+          if (s.connectionState == ConnectionState.waiting) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          return s.data == null ? const SignInPage() : const ProtectDemo();
         },
       );
 }
@@ -109,6 +126,27 @@ class _FaceHomeState extends State<FaceHome> {
   Future<FaceAuthService>? _svc;
   String _log = 'Signed in. Use "Check cloud connection" first.';
   bool _busy = false;
+  final _label = TextEditingController(text: 'me');
+  final _rows = <(String, double)>[]; // calibration log: (label, cosine)
+
+  /// "me" rows are genuine, everything else is an impostor.
+  String _summary() {
+    final g = [for (final r in _rows) if (r.$1.trim().toLowerCase() == 'me') r.$2];
+    final i = [for (final r in _rows) if (r.$1.trim().toLowerCase() != 'me') r.$2];
+    String st(List<double> v) => v.isEmpty
+        ? 'none'
+        : 'n=${v.length} min ${v.reduce(math.min).toStringAsFixed(3)} '
+            'mean ${(v.reduce((a, b) => a + b) / v.length).toStringAsFixed(3)} '
+            'max ${v.reduce(math.max).toStringAsFixed(3)}';
+    final sep = g.isNotEmpty && i.isNotEmpty
+        ? (g.reduce(math.min) > i.reduce(math.max)
+            ? '\nSeparable on this data: lowest genuine > highest impostor. A threshold between '
+                '${i.reduce(math.max).toStringAsFixed(3)} and ${g.reduce(math.min).toStringAsFixed(3)} '
+                'works here, but pick nearer the impostor side and test more people.'
+            : '\nOVERLAP: some impostors score above some genuine attempts. Do not use this setup for login.')
+        : '';
+    return 'Genuine (label "me"): ${st(g)}\nImpostor: ${st(i)}$sep';
+  }
 
   Future<FaceAuthService> _service() => _svc ??= buildCloudService();
 
@@ -158,7 +196,11 @@ class _FaceHomeState extends State<FaceHome> {
         if (f == null) return 'Cancelled.';
         final r = await svc.verify(userId: widget.user.uid, frame: f);
         final s = r.scores.isEmpty ? null : r.scores.first;
+        if (kCalibrating && s?.score != null) _rows.add((_label.text, s!.score!));
         final detail = s == null ? '' : (s.score == null ? '\n${s.error}' : '\nscore ${s.score!.toStringAsFixed(3)}');
+        if (kCalibrating) {
+          return 'CALIBRATION MODE (never accepts)$detail\n\n${_summary()}\n\ntimings ms: ${r.timingsMs}';
+        }
         return '${r.accepted ? "FACE MATCH" : "NO MATCH"}$detail\ntimings ms: ${r.timingsMs}';
       });
 
@@ -201,9 +243,25 @@ class _FaceHomeState extends State<FaceHome> {
               FilledButton(onPressed: _busy ? null : _verify, child: const Text('Verify my face')),
               TextButton(onPressed: _busy ? null : _delete, child: const Text('Delete my face data')),
             ]),
+            if (kCalibrating)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(children: [
+                  Expanded(
+                      child: TextField(
+                          controller: _label,
+                          decoration: const InputDecoration(
+                              labelText: 'Who is in front of the camera? ("me" or a name)'))),
+                  IconButton(
+                      tooltip: 'Copy all scores',
+                      icon: const Icon(Icons.copy),
+                      onPressed: () => Clipboard.setData(ClipboardData(
+                          text: 'label,score\n${_rows.map((r) => "${r.$1},${r.$2.toStringAsFixed(4)}").join("\n")}'))),
+                ]),
+              ),
             if (_busy) const LinearProgressIndicator(),
             const SizedBox(height: 12),
-            Text(_log),
+            Expanded(child: SingleChildScrollView(child: Text(_log))),
           ]),
         ),
       );

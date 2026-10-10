@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'camera_capture.dart';
+import 'cloud/key_service.dart';
 import 'face_privacy.dart';
 
 class ProtectDemo extends StatefulWidget {
@@ -16,17 +18,28 @@ class _DemoState extends State<ProtectDemo> {
   static const _modelAsset = 'assets/models/yolo26n_face.tflite';
   static const _kind = DetectorKind.yolo26;
 
-  final _pass = TextEditingController();
+  // The photo secret now comes from the signed-in user's cloud key (32 random bytes derived per user by the key
+  // service), not from a fixed passphrase. It is already high-entropy, so stretching it adds nothing: 1 round.
+  static const _kdfRounds = 1;
+
+  /// Needs a connection + login the first time per session (the key is then cached in memory only).
+  Future<String> _secret() async {
+    final key = await keyProvider.getKey();
+    final hex = key.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return 'fdae-photo|$hex'; // separate label from the face-template use of the same user key
+  }
+
   FacePrivacyService? _svc;
   Uint8List? _shown; // what is on screen right now
   Uint8List? _protectedPng; // the last encrypted result, kept for Restore
   bool _showingRestored = false;
-  String _status = 'Enter a passphrase, then take a photo.';
+  String _status = 'Tap "Take photo & protect".';
   bool _busy = false;
 
   Future<FacePrivacyService> _service() async => _svc ??= FacePrivacyService(
       modelBytes: (await rootBundle.load(_modelAsset)).buffer.asUint8List(),
       kind: _kind,
+      pbkdf2Iterations: _kdfRounds,
       // low on purpose for a weakly trained smoke-test model; raise to ~0.3-0.5 once trained
       confThreshold: 0.15);
 
@@ -43,7 +56,7 @@ class _DemoState extends State<ProtectDemo> {
       await job();
       _status = '$_status\nwall ${sw.elapsedMilliseconds} ms';
     } on WrongPassphraseException {
-      _status = 'Wrong passphrase.';
+      _status = 'Cannot decrypt: this photo was protected by a different account (or the key changed).';
     } on NoManifestException catch (e) {
       _status = e.toString();
     } catch (e) {
@@ -54,11 +67,10 @@ class _DemoState extends State<ProtectDemo> {
 
   /// Live camera -> detect faces -> encrypt them -> keep + save the encrypted PNG.
   Future<void> _protect() async {
-    if (_pass.text.isEmpty) return setState(() => _status = 'Enter a passphrase first.');
     final photo = await captureFromCamera(context);
     if (photo == null || !mounted) return;
     await _run(() async {
-      final r = await (await _service()).protect(photo, _pass.text);
+      final r = await (await _service()).protect(photo, await _secret());
       final f = await _savedFile();
       await f.writeAsBytes(r.png);
       _protectedPng = r.png;
@@ -73,7 +85,6 @@ class _DemoState extends State<ProtectDemo> {
   /// Decrypts the picture that was just protected (memory, or the saved file
   /// if the app was restarted). No photo picker involved.
   Future<void> _restore() async {
-    if (_pass.text.isEmpty) return setState(() => _status = 'Enter the passphrase used to protect it.');
     Uint8List? src = _protectedPng;
     if (src == null) {
       final f = await _savedFile();
@@ -82,7 +93,7 @@ class _DemoState extends State<ProtectDemo> {
     if (src == null) return setState(() => _status = 'Nothing to restore yet: take a photo and protect it first.');
     final png = src;
     await _run(() async {
-      final r = await (await _service()).unprotect(png, _pass.text);
+      final r = await (await _service()).unprotect(png, await _secret());
       _protectedPng = png;
       _shown = r.png;
       _showingRestored = true;
@@ -92,20 +103,21 @@ class _DemoState extends State<ProtectDemo> {
 
   @override
   Widget build(BuildContext c) => Scaffold(
-        appBar: AppBar(title: const Text('Encrypt faces in a photo')),
+        appBar: AppBar(title: const Text('Encrypt faces in a photo'), actions: [
+          IconButton(
+              tooltip: 'Sign out',
+              icon: const Icon(Icons.logout),
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      keyProvider.clear(); // wipe the key from memory
+                      await FirebaseAuth.instance.signOut();
+                      if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+                    }),
+        ]),
         body: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(children: [
-            TextField(
-              controller: _pass,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Passphrase',
-                helperText: 'Secret key for the faces. Needed again to restore; not stored anywhere.',
-                helperMaxLines: 2,
-              ),
-            ),
-            const SizedBox(height: 8),
             Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
               FilledButton.icon(
                   onPressed: _busy ? null : _protect,

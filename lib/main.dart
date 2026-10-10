@@ -2,7 +2,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'cloud_auth_demo.dart';
 import 'firebase_options.dart';
-import 'protect_demo.dart';
 
 String? firebaseInitError;
 
@@ -27,7 +26,9 @@ class Home extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               FilledButton(
-                  onPressed: () => Navigator.push(c, MaterialPageRoute(builder: (_) => const ProtectDemo())),
+                  onPressed: firebaseInitError != null
+                      ? null
+                      : () => Navigator.push(c, MaterialPageRoute(builder: (_) => const ProtectGate())),
                   child: const Text('Encrypt faces in a photo')),
               const SizedBox(height: 12),
               OutlinedButton(
