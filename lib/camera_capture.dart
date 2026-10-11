@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'ui/app_theme.dart' show SvgIcon;
 
 /// Opens a LIVE camera preview and returns the JPEG bytes of the photo taken
 /// when the user presses the shutter, or null if they back out.
@@ -156,7 +157,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
           if (_canSwitch)
             IconButton(
               tooltip: 'Switch camera',
-              icon: const Icon(Icons.cameraswitch),
+              icon: const SvgIcon('flip', size: 28, fallback: Icons.cameraswitch),
               onPressed: (_busy || _switching) ? null : _switchCamera,
             ),
         ],

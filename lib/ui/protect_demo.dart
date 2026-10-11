@@ -1,13 +1,12 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'camera_capture.dart';
-import 'cloud/key_service.dart';
-import 'face_config.dart';
-import 'face_privacy.dart';
+import '../camera_capture.dart';
+import '../cloud/key_service.dart';
+import '../face_config.dart';
+import '../face_privacy.dart';
 
 class ProtectDemo extends StatefulWidget {
   const ProtectDemo({super.key});
@@ -69,7 +68,7 @@ class _DemoState extends State<ProtectDemo> {
 
   /// Live camera -> detect faces -> encrypt them -> keep + save the encrypted PNG.
   Future<void> _protect() async {
-    final photo = await captureFromCamera(context);
+    final photo = await captureFromCamera(context, front:true);
     if (photo == null || !mounted) return;
     await _run(() async {
       final r = await (await _service()).protect(photo, await _secret());
@@ -105,28 +104,16 @@ class _DemoState extends State<ProtectDemo> {
 
   @override
   Widget build(BuildContext c) => Scaffold(
-        appBar: AppBar(title: const Text('Encrypt faces in a photo'), actions: [
-          IconButton(
-              tooltip: 'Sign out',
-              icon: const Icon(Icons.logout),
-              onPressed: _busy
-                  ? null
-                  : () async {
-                      keyProvider.clear(); // wipe the key from memory
-                      await FirebaseAuth.instance.signOut();
-                      if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
-                    }),
-        ]),
+        appBar: AppBar(title: const Text('Encrypt Photo Demo')),
         body: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
               FilledButton.icon(
                   onPressed: _busy ? null : _protect,
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Take photo & protect')),
+                  label: const Text('Encrypt')),
               OutlinedButton(
-                  onPressed: _busy ? null : _restore, child: const Text('Restore (decrypt)')),
+                  onPressed: _busy ? null : _restore, child: const Text('Decrypt')),
             ]),
             if (_showingRestored && _protectedPng != null)
               TextButton(

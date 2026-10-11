@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   image: ^4.2.0          # decode / orient / resize / PNG encode (pure Dart)
+  flutter_svg: ^2.0.10+1
   crypto: ^3.0.3         # sync HMAC-SHA256 for PBKDF2 + per-face key expansion
   # >=0.12.1 bundles Google LiteRT 1.4.0 (0.11.x bundles TFLite 2.12.0, which likely cannot run models from the
   # new litert_torch exporter). It does NOT fix the 'Inconsistent JVM target' Gradle error by itself -- see README.
@@ -30,8 +31,16 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: 0.14.4
 
 flutter:
   assets:
     # put your exported face model here (float32 or float16, NOT int8 -- see README)
     - assets/models/
+    - assets/images/
+    - assets/icons/
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/icon.png"

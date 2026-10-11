@@ -9,7 +9,7 @@ import 'cloud/firestore_face_store.dart';
 import 'face_config.dart';
 import 'recognition/face_auth_service.dart';
 import 'recognition/face_embedder.dart' show cosine;
-import 'protect_demo.dart';
+import 'ui/protect_demo.dart';
 import 'recognition/liveness.dart';
 
 /// Builds the face service with the user's data key from the key service (Worker or Cloud KMS) and the encrypted

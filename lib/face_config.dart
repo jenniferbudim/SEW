@@ -12,8 +12,8 @@ const kEmbedderAsset = 'assets/models/face_embedder_112.tflite';
 /// CALIBRATION MODE (true): the threshold is 2.0, above any possible cosine (max 1.0), so NOBODY is ever accepted,
 /// but Register works and Verify shows every score. Collect scores, pick a value, put it in [kCalibratedThreshold],
 /// then set this to false.
-const bool kCalibrating = true;
-const double kCalibratedThreshold = double.nan; // fill in after calibration (NaN = refuse to start)
+const bool kCalibrating = false;
+const double kCalibratedThreshold = 0.60;
 const double kMatchThreshold = kCalibrating ? 2.0 : kCalibratedThreshold;
 
 /// Where the per-user data key comes from.
