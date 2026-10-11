@@ -4,7 +4,7 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'face_box.dart';
 import 'yolo_decode.dart';
 
-enum DetectorKind { yolo26, yolov7 }
+enum DetectorKind { yolo26, yolo26pose, yolov7 }
 
 /// Synchronous detector -- construct and call it INSIDE a background isolate
 /// (FacePrivacyService does this) so the UI thread never blocks.
@@ -43,10 +43,25 @@ class TfliteFaceDetector {
     final f = Uint8List.fromList(outT.data).buffer.asFloat32List(); // aligned copy
     final shape = outT.shape;
 
-    final raw = kind == DetectorKind.yolo26
-        ? decodeYolo26(f, shape, lb, rgb.width, rgb.height, conf: confThreshold ?? 0.3)
-        : decodeYolov7(f, shape, lb, rgb.width, rgb.height,
-            conf: confThreshold ?? 0.4, iou: iouThreshold);
+    // Trust the model file, not the setting: a pose model ([1,20,N] or [1,N,20]) must never be read as the plain
+    // 6-column box format just because an old config still says `yolo26` (and vice versa).
+    final dims = shape.sublist(shape.length - 2);
+    final DetectorKind effective = kind == DetectorKind.yolov7
+        ? kind
+        : dims.contains(20)
+            ? DetectorKind.yolo26pose
+            : dims.contains(6)
+                ? DetectorKind.yolo26
+                : kind;
+
+    final raw = switch (effective) {
+      DetectorKind.yolo26 => decodeYolo26(f, shape, lb, rgb.width, rgb.height, conf: confThreshold ?? 0.3),
+      DetectorKind.yolo26pose =>
+        decodeYolo26Pose(f, shape, lb, rgb.width, rgb.height,
+            conf: confThreshold ?? 0.3, iou: iouThreshold),
+      DetectorKind.yolov7 => decodeYolov7(f, shape, lb, rgb.width, rgb.height,
+          conf: confThreshold ?? 0.4, iou: iouThreshold),
+    };
     return [for (final b in raw) b.expanded(boxMargin, rgb.width, rgb.height)];
   }
 

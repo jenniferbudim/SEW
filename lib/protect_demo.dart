@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'camera_capture.dart';
 import 'cloud/key_service.dart';
+import 'face_config.dart';
 import 'face_privacy.dart';
 
 class ProtectDemo extends StatefulWidget {
@@ -15,8 +16,9 @@ class ProtectDemo extends StatefulWidget {
 }
 
 class _DemoState extends State<ProtectDemo> {
-  static const _modelAsset = 'assets/models/yolo26n_face.tflite';
-  static const _kind = DetectorKind.yolo26;
+  // Same detector as the face login: change it in ONE place, face_config.dart.
+  static const _modelAsset = kDetectorAsset;
+  static const _kind = kDetectorKind;
 
   // The photo secret now comes from the signed-in user's cloud key (32 random bytes derived per user by the key
   // service), not from a fixed passphrase. It is already high-entropy, so stretching it adds nothing: 1 round.

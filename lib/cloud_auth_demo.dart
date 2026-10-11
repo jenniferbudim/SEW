@@ -8,6 +8,7 @@ import 'cloud/key_service.dart';
 import 'cloud/firestore_face_store.dart';
 import 'face_config.dart';
 import 'recognition/face_auth_service.dart';
+import 'recognition/face_embedder.dart' show cosine;
 import 'protect_demo.dart';
 import 'recognition/liveness.dart';
 
@@ -127,6 +128,7 @@ class _FaceHomeState extends State<FaceHome> {
   String _log = 'Signed in. Use "Check cloud connection" first.';
   bool _busy = false;
   final _label = TextEditingController(text: 'me');
+  final _shots = <DebugCrop>[]; // debug: crops of successive photos, compared with the first
   final _rows = <(String, double)>[]; // calibration log: (label, cosine)
 
   /// "me" rows are genuine, everything else is an impostor.
@@ -179,9 +181,13 @@ class _FaceHomeState extends State<FaceHome> {
         final frames = <Uint8List>[];
         for (var i = 0; i < svc.config.enrollSamples; i++) {
           if (!mounted) return 'Cancelled.';
-          final f = await captureFromCamera(context, front: true);
+          final f = await captureFromCamera(context,
+              front: true,
+              title: 'Register: photo ${i + 1} of ${svc.config.enrollSamples}',
+              hint: 'The camera reopens for each photo. Slightly change your head angle each time.');
           if (f == null) return 'Cancelled.';
           frames.add(f);
+          await Future<void>.delayed(const Duration(milliseconds: 400)); // let the camera hardware settle
         }
         final r = await svc.enroll(
             userId: widget.user.uid, name: widget.user.email ?? widget.user.uid, frames: frames);
@@ -203,6 +209,35 @@ class _FaceHomeState extends State<FaceHome> {
         }
         return '${r.accepted ? "FACE MATCH" : "NO MATCH"}$detail\ntimings ms: ${r.timingsMs}';
       });
+
+  /// Debug: take a photo, show the box + the exact 112x112 chip the embedder sees, and its similarity to shot #1.
+  Future<void> _debugShot() => _run(() async {
+        final svc = await _service();
+        if (!mounted) return 'Cancelled.';
+        final f = await captureFromCamera(context,
+            front: true, title: 'Debug photo ${_shots.length + 1}', hint: 'Look straight at the camera.');
+        if (f == null) return 'Cancelled.';
+        final d = await svc.debugCrop(f);
+        _shots.add(d);
+        return 'Debug photo ${_shots.length} done. Compare the chips: is the face the same size and position in each?';
+      });
+
+  Widget _debugPanel() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        for (var i = 0; i < _shots.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Image.memory(_shots[i].chipPng, width: 112, height: 112, filterQuality: FilterQuality.none),
+              const SizedBox(width: 8),
+              Image.memory(_shots[i].framePng, width: 100),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: Text('#${i + 1}  ${_shots[i].info}'
+                      '${i == 0 ? "" : "\nsimilarity to #1: ${cosine(_shots[0].embedding, _shots[i].embedding).toStringAsFixed(3)}"}',
+                      style: const TextStyle(fontSize: 12))),
+            ]),
+          ),
+      ]);
 
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
@@ -242,6 +277,11 @@ class _FaceHomeState extends State<FaceHome> {
               FilledButton(onPressed: _busy ? null : _register, child: const Text('Register my face')),
               FilledButton(onPressed: _busy ? null : _verify, child: const Text('Verify my face')),
               TextButton(onPressed: _busy ? null : _delete, child: const Text('Delete my face data')),
+              if (kCalibrating) ...[
+                OutlinedButton(onPressed: _busy ? null : _debugShot, child: const Text('Debug: crop photo')),
+                if (_shots.isNotEmpty)
+                  TextButton(onPressed: () => setState(_shots.clear), child: const Text('Clear debug')),
+              ],
             ]),
             if (kCalibrating)
               Padding(
@@ -261,7 +301,7 @@ class _FaceHomeState extends State<FaceHome> {
               ),
             if (_busy) const LinearProgressIndicator(),
             const SizedBox(height: 12),
-            Expanded(child: SingleChildScrollView(child: Text(_log))),
+            Expanded(child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(_log), if (_shots.isNotEmpty) _debugPanel()]))),
           ]),
         ),
       );

@@ -6,13 +6,16 @@ import 'package:flutter/material.dart';
 /// when the user presses the shutter, or null if they back out.
 /// [front] only chooses which camera opens FIRST; the user can flip between
 /// front and back with the switch button (shown when the device has both).
-Future<Uint8List?> captureFromCamera(BuildContext context, {bool front = false}) =>
+/// [title]/[hint] let a multi-photo flow say which photo this is ("Photo 2 of 3").
+Future<Uint8List?> captureFromCamera(BuildContext context,
+        {bool front = false, String? title, String? hint}) =>
     Navigator.of(context).push<Uint8List>(
-        MaterialPageRoute(builder: (_) => CameraCaptureScreen(front: front)));
+        MaterialPageRoute(builder: (_) => CameraCaptureScreen(front: front, title: title, hint: hint)));
 
 class CameraCaptureScreen extends StatefulWidget {
-  const CameraCaptureScreen({super.key, this.front = false});
+  const CameraCaptureScreen({super.key, this.front = false, this.title, this.hint});
   final bool front;
+  final String? title, hint;
   @override
   State<CameraCaptureScreen> createState() => _CameraCaptureScreenState();
 }
@@ -123,6 +126,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
     try {
       final shot = await c.takePicture();
       final bytes = await shot.readAsBytes();
+      // Release the camera completely BEFORE leaving. If the next screen (register photo 2, 3) opens while this
+      // controller is still being disposed in the background, the new preview comes up blank.
+      if (mounted) setState(() => _c = null);
+      await c.dispose();
       if (mounted) Navigator.of(context).pop(bytes);
     } on CameraException catch (e) {
       if (!mounted) return;
@@ -144,7 +151,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
     final ready = c != null && _error == null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_lens == CameraLensDirection.front ? 'Front camera' : 'Back camera'),
+        title: Text(widget.title ?? (_lens == CameraLensDirection.front ? 'Front camera' : 'Back camera')),
         actions: [
           if (_canSwitch)
             IconButton(
@@ -158,7 +165,16 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
           ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
           : c == null
               ? const Center(child: CircularProgressIndicator())
-              : Center(child: CameraPreview(c)),
+              : Stack(alignment: Alignment.topCenter, children: [
+                  Center(child: CameraPreview(c)),
+                  if (widget.hint != null)
+                    Container(
+                        width: double.infinity,
+                        color: Colors.black54,
+                        padding: const EdgeInsets.all(8),
+                        child: Text(widget.hint!,
+                            textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))),
+                ]),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: !ready
           ? null

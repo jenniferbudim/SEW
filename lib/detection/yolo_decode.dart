@@ -109,6 +109,28 @@ List<FaceBox> decodeYolo26(Float32List out, List<int> shape, Letterbox lb,
   return _finish(c, lb, imgW, imgH);
 }
 
+/// YOLO26-POSE as Ultralytics exports it: NOT end-to-end. One row per anchor (8400 at 640x640):
+///   [cx, cy, w, h, score, kx0,ky0,kc0, ... kx4,ky4,kc4]  = 4 + 1 + 15 = 20 values, pixel coords of the model input,
+/// so it needs NMS (the top rows are near-duplicates of the same face).
+/// VERIFIED in the sandbox on the official yolo26n-pose.pt: boxes and keypoints from the raw ONNX rows matched
+/// PyTorch's own predictions to within 1-3 px. Keypoint order for the face model:
+///   left eye, right eye, nose, left mouth corner, right mouth corner (image-left first).
+List<FaceBox> decodeYolo26Pose(Float32List out, List<int> shape, Letterbox lb,
+    int imgW, int imgH, {double conf = 0.3, double iou = 0.5}) {
+  final g = _Grid.from(out, shape, 20);
+  final c = <_Cand>[];
+  for (var r = 0; r < g.rows; r++) {
+    final s = g.at(r, 4);
+    if (s < conf) continue;
+    final cx = g.at(r, 0), cy = g.at(r, 1), w = g.at(r, 2), h = g.at(r, 3);
+    final lm = <double>[
+      for (var k = 0; k < 5; k++) ...[g.at(r, 5 + 3 * k), g.at(r, 6 + 3 * k)]
+    ];
+    c.add(_Cand(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, s, lm));
+  }
+  return _finish(_nms(c, iou), lb, imgW, imgH);
+}
+
 /// YOLOv7-face (--grid): rows of [cx,cy,w,h,obj,cls, 5x(kx,ky,kconf)]. Needs NMS.
 List<FaceBox> decodeYolov7(Float32List out, List<int> shape, Letterbox lb,
     int imgW, int imgH, {double conf = 0.4, double iou = 0.5}) {
