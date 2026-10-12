@@ -17,6 +17,11 @@ void logScore({
   double? threshold,
   String? error,
   Map<String, int>? timingsMs,
+  double? liveScore, // spoof score, lower = more live
+  int? sharpness,
+  String? liveVerdict, // 'live' | 'spoof-or-quality' | null if not run
+  String? liveMode, // off | logOnly | enforce
+  int? failCount, // consecutive failed attempts after this one
 }) {
   if (!kLogScores) return;
   final u = FirebaseAuth.instance.currentUser;
@@ -30,6 +35,11 @@ void logScore({
     'threshold': threshold,
     'error': error,
     'timingsMs': timingsMs,
+    'liveScore': liveScore,
+    'sharpness': sharpness,
+    'liveVerdict': liveVerdict,
+    'liveMode': liveMode,
+    'failCount': failCount,
     'createdAt': FieldValue.serverTimestamp(),
   }).then<void>((_) {}, onError: (Object e) => debugPrint('Score log failed: $e'));
 }

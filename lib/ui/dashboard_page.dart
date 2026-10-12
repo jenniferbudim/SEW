@@ -5,9 +5,10 @@ import '../cloud/firestore_face_store.dart';
 import '../cloud/key_service.dart';
 import '../cloud_auth_demo.dart' show FaceHome;
 import '../face_config.dart';
-import 'protect_demo.dart';
+import '../protect_demo.dart';
 import 'app_theme.dart';
 import 'landing_page.dart';
+import 'metrics_page.dart';
 import 'sign_up_page.dart';
 
 /// Screen 3 of the mockup.
@@ -186,8 +187,14 @@ class _DashboardPageState extends State<DashboardPage> {
                 // Not in the mockup: the thesis' photo-encryption feature has to be reachable from somewhere.
                 IconAction(
                     svg: 'encrypt',
-                    label: 'Encrypt Demo',
+                    label: 'Encrypt photo',
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProtectDemo()))),
+                // Thesis measurements (NPCR, UACI, entropy, timing, memory ...). Hide with kShowMetrics in metrics_page.dart.
+                if (kShowMetrics)
+                  IconAction(
+                      icon: Icons.analytics_outlined,
+                      label: 'Metrics',
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MetricsPage()))),
                 // Only while the match threshold is being calibrated (kCalibrating in face_config.dart).
                 if (kCalibrating)
                   IconAction(

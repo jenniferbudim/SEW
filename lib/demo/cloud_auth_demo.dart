@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
@@ -9,19 +10,35 @@ import 'cloud/firestore_face_store.dart';
 import 'face_config.dart';
 import 'recognition/face_auth_service.dart';
 import 'recognition/face_embedder.dart' show cosine;
-import 'ui/protect_demo.dart';
+import 'protect_demo.dart';
 import 'recognition/liveness.dart';
+import 'recognition/liveness_config.dart';
+import 'recognition/tflite_liveness.dart';
 
 /// Builds the face service with the user's data key from the key service (Worker or Cloud KMS) and the encrypted
 /// templates in Firestore. Fails (with a readable message) if the key service, models or threshold are missing.
 Future<FaceAuthService> buildCloudService() async {
   final key = Uint8List.fromList(await keyProvider.getKey()); // copy: cache can be zeroed on sign-out
+  final detector = (await rootBundle.load(kDetectorAsset)).buffer.asUint8List();
+  LivenessCheck liveness = const NoLiveness();
+  if (kLivenessMode != LivenessMode.off) {
+    try {
+      liveness = TfliteLiveness(
+          detectorModel: detector,
+          detectorKind: kDetectorKind,
+          spoofModel: (await rootBundle.load(kLiveAsset)).buffer.asUint8List());
+    } catch (e) {
+      // enforce: never silently fall back to "no liveness"; logOnly: the app still works, the log shows no scores
+      if (kLivenessMode == LivenessMode.enforce) rethrow;
+      debugPrint('Liveness model not available ($kLiveAsset): $e');
+    }
+  }
   return FaceAuthService(
-    detectorModel: (await rootBundle.load(kDetectorAsset)).buffer.asUint8List(),
+    detectorModel: detector,
     embedderModel: (await rootBundle.load(kEmbedderAsset)).buffer.asUint8List(),
     store: FirestoreFaceStore(),
     deviceKey: key, // name is historical: this is the per-user cloud data key
-    liveness: const NoLiveness(), // NOT secure: replace with a real liveness check
+    liveness: liveness,
     config: FaceAuthConfig(matchThreshold: kMatchThreshold),
     detectorKind: kDetectorKind,
   );
