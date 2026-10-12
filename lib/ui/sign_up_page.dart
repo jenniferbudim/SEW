@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../cloud/score_log.dart';
 import '../recognition/face_auth_service.dart';
 import 'app_theme.dart';
+import '../security/logout_flag.dart';
 import 'consent_page.dart';
 import 'dashboard_page.dart';
 import 'face_photo_panel.dart';
@@ -32,6 +33,7 @@ class _SignUpPageState extends State<SignUpPage> {
     });
     try {
       await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: _pw.text);
+      await LogoutFlag.clear();
       if (!mounted) return;
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ConsentPage()));
       return;

@@ -4,16 +4,16 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
-import 'camera_capture.dart';
-import 'cloud/key_service.dart';
-import 'cloud/firestore_face_store.dart';
-import 'face_config.dart';
-import 'recognition/face_auth_service.dart';
-import 'recognition/face_embedder.dart' show cosine;
+import '../camera_capture.dart';
+import '../cloud/key_service.dart';
+import '../cloud/firestore_face_store.dart';
+import '../face_config.dart';
+import '../recognition/face_auth_service.dart';
+import '../recognition/face_embedder.dart' show cosine;
 import 'protect_demo.dart';
-import 'recognition/liveness.dart';
-import 'recognition/liveness_config.dart';
-import 'recognition/tflite_liveness.dart';
+import '../recognition/liveness.dart';
+import '../recognition/liveness_config.dart';
+import '../recognition/tflite_liveness.dart';
 
 /// Builds the face service with the user's data key from the key service (Worker or Cloud KMS) and the encrypted
 /// templates in Firestore. Fails (with a readable message) if the key service, models or threshold are missing.

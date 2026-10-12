@@ -9,6 +9,7 @@ import '../recognition/face_auth_service.dart';
 import '../recognition/liveness_config.dart';
 import '../recognition/tflite_liveness.dart';
 import '../security/attempt_limiter.dart';
+import '../security/logout_flag.dart';
 import 'app_theme.dart';
 import 'consent_page.dart';
 import 'dashboard_page.dart';
@@ -47,6 +48,13 @@ class _SignInPageState extends State<SignInPage> {
   }
 
   Future<void> _checkTemplate() async {
+    if (await LogoutFlag.isSet()) {
+      // the user logged out on purpose: drop any leftover session so the email + password step is shown
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+      if (mounted) setState(() {});
+    }
     final u = FirebaseAuth.instance.currentUser;
     if (u == null) return;
     try {
@@ -112,8 +120,9 @@ class _SignInPageState extends State<SignInPage> {
     }
     FaceAuthService? svc;
     try {
-      svc = _svc ??= await buildCloudService();
-      final r = await svc.verify(userId: u.uid, frame: jpeg);
+      final s = _svc ??= await buildCloudService();
+      svc = s;
+      final r = await s.verify(userId: u.uid, frame: jpeg);
       final score = r.scores.isEmpty ? null : r.scores.first;
       final live = _lastLive(svc);
       logScore(
@@ -251,6 +260,7 @@ class _EmailStepState extends State<_EmailStep> {
     });
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(email: _email.text.trim(), password: _pw.text);
+      await LogoutFlag.clear();
       widget.onDone();
       return;
     } on FirebaseAuthException catch (e) {
@@ -267,7 +277,7 @@ class _EmailStepState extends State<_EmailStep> {
           Text(widget.headline ?? 'This phone does not know you yet. Enter your account first, then verify your face.',
               style: const TextStyle(color: kPlum)),
           const SizedBox(height: 16),
-          TextField(controller: _email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(hintText: 'Email')),
+          TextField(controller: _email, keyboardType: TextInputType.emailAddress, autofillHints: null, enableSuggestions: false, autocorrect: false, decoration: const InputDecoration(hintText: 'Email')),
           const SizedBox(height: 12),
           TextField(controller: _pw, obscureText: true, decoration: const InputDecoration(hintText: 'Password')),
           if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: Color(0xFFB00020)))),

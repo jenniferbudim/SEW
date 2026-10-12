@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../cloud/firestore_face_store.dart';
 import '../cloud/key_service.dart';
-import '../cloud_auth_demo.dart' show FaceHome;
+import '../demo/cloud_auth_demo.dart' show FaceHome;
 import '../face_config.dart';
-import '../protect_demo.dart';
+import '../demo/protect_demo.dart';
+import '../security/logout_flag.dart';
 import 'app_theme.dart';
 import 'landing_page.dart';
 import 'metrics_page.dart';
@@ -49,16 +50,23 @@ class _DashboardPageState extends State<DashboardPage> {
   void _toLanding() => Navigator.pushAndRemoveUntil(
       context, MaterialPageRoute(builder: (_) => const LandingPage()), (r) => false);
 
-  /// Log out: forget the key and return to the start. The phone keeps the account, so the next sign-in is face only.
-  void _logout() {
-    keyProvider.clear();
-    _toLanding();
-  }
-
-  /// Fully forget the account on this phone (the next sign-in asks for email + password).
-  Future<void> _switchAccount() async {
-    keyProvider.clear();
-    await FirebaseAuth.instance.signOut();
+  /// Log out: forget the key AND the account on this phone, so the next sign-in asks for email + password first.
+  Future<void> _logout() async {
+    try {
+      keyProvider.clear();
+    } catch (_) {}
+    await LogoutFlag.set(); // from now on the app insists on email + password, even if a session were left behind
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Log out failed: $e')));
+      return;
+    }
+    // signOut() returned, but check: if a user is still there, say so instead of silently going on
+    if (FirebaseAuth.instance.currentUser != null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Log out did not complete. Try again.')));
+      return;
+    }
     if (mounted) _toLanding();
   }
 
@@ -70,14 +78,8 @@ class _DashboardPageState extends State<DashboardPage> {
             const Text('Email', style: TextStyle(fontSize: 12)),
             Text(_user?.email ?? '-'),
           ]),
-          actionsAlignment: MainAxisAlignment.spaceBetween,
+          actionsAlignment: MainAxisAlignment.end,
           actions: [
-            TextButton(
-                onPressed: () {
-                  Navigator.pop(c);
-                  _switchAccount();
-                },
-                child: const Text('Switch account')),
             FilledButton(
                 onPressed: () {
                   Navigator.pop(c);
@@ -187,18 +189,18 @@ class _DashboardPageState extends State<DashboardPage> {
                 // Not in the mockup: the thesis' photo-encryption feature has to be reachable from somewhere.
                 IconAction(
                     svg: 'encrypt',
-                    label: 'Encrypt photo',
+                    label: 'Encrypt',
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProtectDemo()))),
                 // Thesis measurements (NPCR, UACI, entropy, timing, memory ...). Hide with kShowMetrics in metrics_page.dart.
                 if (kShowMetrics)
                   IconAction(
-                      icon: Icons.analytics_outlined,
+                      svg: 'metrics',
                       label: 'Metrics',
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MetricsPage()))),
                 // Only while the match threshold is being calibrated (kCalibrating in face_config.dart).
                 if (kCalibrating)
                   IconAction(
-                      icon: Icons.tune,
+                      svg: 'calibrate',
                       label: 'Calibrate',
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FaceHome(user: _user!)))),
               ]),

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'camera_capture.dart';
-import 'recognition/face_auth_service.dart';
+import '../camera_capture.dart';
+import '../recognition/face_auth_service.dart';
 
 class AuthDemo extends StatefulWidget {
   const AuthDemo({super.key, required this.service});
