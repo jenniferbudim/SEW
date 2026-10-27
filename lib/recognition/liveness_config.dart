@@ -23,9 +23,10 @@ const kLivenessMode = LivenessMode.logOnly;
 /// Trained for print and replay attacks only (no masks, no deepfakes).
 const kLiveAsset = 'assets/models/FaceAntiSpoofing.tflite';
 
-/// Spoof score below this = live. 0.2 is the model author's default, NOT calibrated for your phone.
-const double kLiveThreshold = 0.2;
+/// Spoof score below this = live. The model author's default is 0.2; raised to 0.4 as a PROVISIONAL value for phone
+/// cameras. Replace it with a value between your real-face liveScores and your print/screen-attack liveScores.
+const double kLiveThreshold = 0.4;
 
 /// Minimum "sharpness" (count of strong Laplacian responses in the 256x256 face crop) before the model is trusted.
-/// 1000 is the author's default; a blurry or dark photo is rejected as "too blurry" instead of being judged.
-const int kMinSharpness = 1000;
+/// The author's default is 1000; lowered to a PROVISIONAL 400 for phone cameras; a blurry or dark photo is rejected as "too blurry" instead of being judged.
+const int kMinSharpness = 400;

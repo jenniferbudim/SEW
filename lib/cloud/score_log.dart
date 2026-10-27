@@ -19,7 +19,7 @@ void logScore({
   Map<String, int>? timingsMs,
   double? liveScore, // spoof score, lower = more live
   int? sharpness,
-  String? liveVerdict, // 'live' | 'spoof-or-quality' | null if not run
+  String? liveVerdict, // 'live' | 'spoof' | 'too-blurry' | 'error' | null if not run
   String? liveMode, // off | logOnly | enforce
   int? failCount, // consecutive failed attempts after this one
 }) {

@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io' show Platform, ProcessInfo;
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' hide Summary;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -229,6 +231,20 @@ class _MetricsPageState extends State<MetricsPage> {
     return b.toString();
   }
 
+  bool _isHist(String k) => k.startsWith('h_p') || k.startsWith('h_c');
+
+  /// One entry per trial: {plain: [[256 R], [256 G], [256 B]], cipher: [...]}, taken out of the rows.
+  List<Map<String, dynamic>> _histograms() => [
+        for (final r in _rows)
+          {
+            for (final kind in const ['plain', 'cipher'])
+              kind: [
+                for (var c = 0; c < 3; c++)
+                  [for (var b = 0; b < 256; b++) (r['h_${kind == 'plain' ? 'p' : 'c'}${c}_$b'] ?? 0).toInt()]
+              ]
+          }
+      ];
+
   String _json() => const JsonEncoder.withIndent('  ').convert(_clean({
         'device': _device(),
         'config': {
@@ -246,12 +262,27 @@ class _MetricsPageState extends State<MetricsPage> {
         'keyspace_theoretical_log2': theoreticalKeyspaceLog2(),
         'summary': {for (final e in _summaries().entries) e.key: e.value.toJson()},
         'scaling': _scaling,
-        'rows': _rows,
+        'histograms': _histograms(),
+        'rows': [
+          for (final r in _rows) {for (final e in r.entries) if (!_isHist(e.key)) e.key: e.value}
+        ],
       }));
 
-  void _copy(String text, String what) {
-    Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$what copied to the clipboard.')));
+  /// Opens the system "save as" dialog so the file goes to a folder the user picks (e.g. Downloads).
+  Future<void> _download(String text, String what, String ext) async {
+    final stamp = DateTime.now().toIso8601String().substring(0, 19).replaceAll(RegExp('[:T]'), '-');
+    try {
+      final saved = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save $what',
+        fileName: 'fdae_metrics_$stamp.$ext',
+        bytes: Uint8List.fromList(utf8.encode(text)),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(saved == null && !Platform.isAndroid ? 'Save cancelled.' : '$what saved.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save $what: $e')));
+    }
   }
 
   TableRow _row(List<String> c, {bool head = false, String? note}) => TableRow(children: [
@@ -340,8 +371,8 @@ class _MetricsPageState extends State<MetricsPage> {
         Wrap(spacing: 8, runSpacing: 8, children: [
           FilledButton(onPressed: _busy ? null : _trial, child: const Text('Take trial photo')),
           FilledButton(onPressed: _busy ? null : _scale, child: const Text('Scaling + complexity')),
-          FilledButton(onPressed: _rows.isEmpty ? null : () => _copy(_csv(), 'CSV'), child: const Text('Copy CSV')),
-          FilledButton(onPressed: _rows.isEmpty && _scaling == null ? null : () => _copy(_json(), 'JSON'), child: const Text('Copy JSON')),
+          FilledButton(onPressed: _rows.isEmpty ? null : () => _download(_csv(), 'CSV', 'csv'), child: const Text('Download CSV')),
+          FilledButton(onPressed: _rows.isEmpty && _scaling == null ? null : () => _download(_json(), 'JSON', 'json'), child: const Text('Download JSON')),
           TextButton(
               onPressed: _busy
                   ? null

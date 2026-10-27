@@ -135,7 +135,7 @@ class _SignInPageState extends State<SignInPage> {
           timingsMs: r.timingsMs,
           liveScore: live?.score,
           sharpness: live?.sharpness,
-          liveVerdict: live == null ? null : (live.live ? 'live' : 'spoof-or-quality'),
+          liveVerdict: live?.verdict,
           liveMode: kLivenessMode.name);
       if (kCalibrating) {
         return 'Calibration mode: login is switched off while the match threshold is being set.'
@@ -162,7 +162,7 @@ class _SignInPageState extends State<SignInPage> {
           error: 'not live',
           liveScore: live?.score,
           sharpness: live?.sharpness,
-          liveVerdict: 'spoof-or-quality',
+          liveVerdict: live?.verdict ?? 'error',
           liveMode: kLivenessMode.name);
       final more = await _fail(limiter);
       return 'Liveness check failed${live?.reason != null ? ": ${live!.reason}" : "."}$more';

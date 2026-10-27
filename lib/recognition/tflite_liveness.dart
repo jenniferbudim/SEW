@@ -24,6 +24,10 @@ class LivenessResult {
   final int? sharpness; // Laplacian count on the 256x256 crop
   final String? reason; // human-readable, when live == false
   final bool faceFound;
+
+  /// Reason label for the score log: 'live' | 'spoof' (model score too high) | 'too-blurry' (sharpness gate, the
+  /// model was not run) | 'error' (the check could not run).
+  String get verdict => live ? 'live' : (score != null ? 'spoof' : (sharpness != null ? 'too-blurry' : 'error'));
 }
 
 class _Job {

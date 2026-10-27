@@ -253,6 +253,21 @@ Map<String, double> analyseTrial(TrialInput t) {
   }
   row['entropy_ideal_ref'] = _nanMean(ideal);
 
+  // ---- raw 256-bin histograms (R, G, B) of the plain and the cipher face, for the histogram figure ----
+  for (var c = 0; c < 3; c++) {
+    final hp = List<int>.filled(256, 0), hc = List<int>.filled(256, 0);
+    for (final v in pc[c]) {
+      hp[v]++;
+    }
+    for (final v in ec[c]) {
+      hc[v]++;
+    }
+    for (var b = 0; b < 256; b++) {
+      row['h_p${c}_$b'] = hp[b].toDouble();
+      row['h_c${c}_$b'] = hc[b].toDouble();
+    }
+  }
+
   // ---- histogram analysis: chi-square vs uniform (critical value for p = 0.05, 255 dof = 293.2478) ----
   final chiP = [for (final c in pc) chi2Uniform(c)];
   final chiC = [for (final c in ec) chi2Uniform(c)];
