@@ -35,6 +35,16 @@ class _SignInPageState extends State<SignInPage> {
   bool _needPassword = false;
   String? _loadError;
 
+  // CALIBRATION ONLY (kCalibrating): say who is in front of the camera, so the log can tell genuine from impostor
+  // attempts. Outside calibration the label is always 'me'.
+  String _who = 'me';
+  final _tester = TextEditingController();
+  String get _label {
+    if (!kCalibrating) return 'me';
+    final n = _tester.text.trim().replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '');
+    return n.isEmpty || _who == 'me' ? _who : '$_who:$n';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +54,7 @@ class _SignInPageState extends State<SignInPage> {
   @override
   void dispose() {
     _tick?.cancel();
+    _tester.dispose();
     super.dispose();
   }
 
@@ -127,7 +138,7 @@ class _SignInPageState extends State<SignInPage> {
       final live = _lastLive(svc);
       logScore(
           event: 'verify',
-          label: 'me',
+          label: _label,
           score: score?.score,
           accepted: kCalibrating ? false : r.accepted,
           threshold: kMatchThreshold,
@@ -156,7 +167,7 @@ class _SignInPageState extends State<SignInPage> {
       final live = _lastLive(svc);
       logScore(
           event: 'verify',
-          label: 'me',
+          label: _label,
           accepted: false,
           threshold: kMatchThreshold,
           error: 'not live',
@@ -168,13 +179,42 @@ class _SignInPageState extends State<SignInPage> {
       return 'Liveness check failed${live?.reason != null ? ": ${live!.reason}" : "."}$more';
     } on FaceAuthException catch (e) {
       // no face / several faces / face too small: not an authentication attempt, so it is not counted as a failure
-      logScore(event: 'verify', label: 'me', accepted: false, threshold: kMatchThreshold, error: '$e');
+      logScore(event: 'verify', label: _label, accepted: false, threshold: kMatchThreshold, error: '$e');
       return '$e';
     } catch (e) {
       _svc = null;
       return 'Error: $e';
     }
   }
+
+  /// Calibration only: who is in front of the camera right now? Logged in the `label` field.
+  Widget _calibrationBar() => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(10),
+        color: const Color(0xFFE8F0FE),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Calibration: who is in front of the camera?', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          DropdownButton<String>(
+            value: _who,
+            isExpanded: true,
+            items: const [
+              DropdownMenuItem(value: 'me', child: Text('The account owner (genuine)')),
+              DropdownMenuItem(value: 'impostor', child: Text('Someone else (impostor)')),
+              DropdownMenuItem(value: 'spoof-print', child: Text('Attack: printed photo of the owner')),
+              DropdownMenuItem(value: 'spoof-screen', child: Text('Attack: owner photo on a screen')),
+            ],
+            onChanged: (v) => setState(() => _who = v ?? 'me'),
+          ),
+          if (_who != 'me')
+            TextField(
+              controller: _tester,
+              decoration: const InputDecoration(hintText: 'Tester name or code (optional, e.g. B)', isDense: true),
+              onChanged: (_) => setState(() {}),
+            ),
+          Text('Logged as: $_label', style: const TextStyle(fontSize: 12)),
+        ]),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -229,6 +269,7 @@ class _SignInPageState extends State<SignInPage> {
             child: Text('Too many failed attempts (${_lim.fails} in a row). Face login is locked for ${_lim.secondsLeft} s.',
                 style: const TextStyle(fontSize: 13)),
           ),
+        if (kCalibrating) _calibrationBar(),
         Expanded(child: FacePhotoPanel(caption: user.email, onConfirm: _onConfirm)),
       ]);
     }

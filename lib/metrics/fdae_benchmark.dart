@@ -58,9 +58,28 @@ class TrialInput {
 }
 
 // Results are rebuilt after the isolate hop so the generic types are exactly what the callers expect.
-Future<Map<String, double>> runAnalysis(TrialInput i) async {
-  final Map raw = await Isolate.run<Map>(() => analyseTrial(i));
-  return {for (final e in raw.entries) '${e.key}': (e.value as num).toDouble()};
+Future<Map<String, double>> runAnalysis(TrialInput i) async => (await runAnalysisWithImages(i)).row;
+
+/// The metric row plus PNGs of the face that was measured (plaintext crop and its cipher image).
+class TrialResult {
+  TrialResult(this.row, this.plainFacePng, this.cipherFacePng);
+  final Map<String, double> row;
+  final Uint8List? plainFacePng, cipherFacePng;
+}
+
+Future<TrialResult> runAnalysisWithImages(TrialInput i) async {
+  final Map raw = await Isolate.run<Map>(() {
+    final images = <String, Uint8List>{};
+    final row = analyseTrial(i, images: images);
+    return {'row': row, 'images': images};
+  });
+  final r = raw['row'] as Map;
+  final im = raw['images'] as Map;
+  return TrialResult(
+    {for (final e in r.entries) '${e.key}': (e.value as num).toDouble()},
+    im['plain'] as Uint8List?,
+    im['cipher'] as Uint8List?,
+  );
 }
 
 Future<Map<String, dynamic>> runScalingBench() async {
@@ -111,7 +130,7 @@ double _nanMean(List<double> v) {
 double _mb(int bytes) => bytes / 1048576.0;
 
 /// One trial = one photo. Returns metric name -> value. `n_faces == 0` means "nothing usable in this photo".
-Map<String, double> analyseTrial(TrialInput t) {
+Map<String, double> analyseTrial(TrialInput t, {Map<String, Uint8List>? images}) {
   final row = <String, double>{};
   final sw = Stopwatch();
   double ms() => sw.elapsedMicroseconds / 1000.0;
@@ -289,6 +308,12 @@ Map<String, double> analyseTrial(TrialInput t) {
 
   // ---- MSE / PSNR / SSIM on the full 3-channel crop ----
   final plainI = mergeRgb(pc), cipherI = mergeRgb(ec), decI = mergeRgb(dc);
+  if (images != null) {
+    Uint8List png(Uint8List rgbBytes) => img.encodePng(
+        img.Image.fromBytes(width: bw, height: bh, bytes: Uint8List.fromList(rgbBytes).buffer, numChannels: 3));
+    images['plain'] = png(plainI);
+    images['cipher'] = png(cipherI);
+  }
   final m1 = mse(plainI, cipherI), m2 = mse(plainI, decI);
   row['mse_plain_cipher'] = m1;
   row['psnr_plain_cipher'] = psnrFromMse(m1);

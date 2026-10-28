@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' show Platform, ProcessInfo;
 import 'dart:typed_data';
+import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' hide Summary;
 import 'package:flutter/material.dart';
@@ -112,6 +113,8 @@ class MetricsPage extends StatefulWidget {
 class _MetricsPageState extends State<MetricsPage> {
   static const _secret = 'bench-secret-not-a-real-key'; // local only; the real app derives it from the cloud key
   final _rows = <Map<String, double>>[];
+  // Per trial: original photo (JPEG), full protected PNG, plaintext face crop, encrypted face crop.
+  final _photos = <({Uint8List original, Uint8List protectedPng, Uint8List? plainFace, Uint8List? cipherFace})>[];
   int _skipped = 0;
   Map<String, dynamic>? _scaling;
   bool _busy = false;
@@ -141,7 +144,7 @@ class _MetricsPageState extends State<MetricsPage> {
       final u = await svc.unprotect(p.png, _secret);
       final wallMs = wall.elapsedMilliseconds;
       if (mounted) setState(() => _status = 'Trial ${_rows.length + 1}: measuring NPCR, entropy, key sensitivity ... (can take up to a minute)');
-      final row = await runAnalysis(TrialInput(
+      final res = await runAnalysisWithImages(TrialInput(
         photo: photo,
         restoredPng: u.png,
         model: model,
@@ -150,6 +153,7 @@ class _MetricsPageState extends State<MetricsPage> {
         boxes: [for (final f in p.faces) [f.x1, f.y1, f.x2, f.y2]],
         seed: 1000 + _rows.length,
       ));
+      final row = res.row;
       if ((row['n_faces'] ?? 0) == 0) {
         _skipped++;
         _status = 'The face was smaller than 32 px, so the trial was skipped. Move closer.';
@@ -175,6 +179,7 @@ class _MetricsPageState extends State<MetricsPage> {
       row['png_kb'] = p.png.length / 1024.0;
       row['n_faces_detected'] = p.faces.length.toDouble();
       _rows.add(row);
+      _photos.add((original: photo, protectedPng: p.png, plainFace: res.plainFacePng, cipherFace: res.cipherFacePng));
       _status = 'Trial ${_rows.length} done (${p.faces.length} face(s), '
           'total ${row['total_ms']!.toStringAsFixed(0)} ms). Take the next photo.';
     } catch (e) {
@@ -285,6 +290,37 @@ class _MetricsPageState extends State<MetricsPage> {
     }
   }
 
+  /// All trial photos in one ZIP: trial01_plain_photo.jpg, trial01_encrypted_photo.png (whole frame as the app
+  /// protects it), trial01_plain_face.png, trial01_encrypted_face.png (the measured face crop).
+  Future<void> _downloadPhotos() async {
+    final stamp = DateTime.now().toIso8601String().substring(0, 19).replaceAll(RegExp('[:T]'), '-');
+    try {
+      final zip = Archive();
+      void add(String name, Uint8List? b) {
+        if (b != null) zip.addFile(ArchiveFile(name, b.length, b));
+      }
+      for (var i = 0; i < _photos.length; i++) {
+        final n = (i + 1).toString().padLeft(2, '0');
+        final p = _photos[i];
+        add('trial${n}_plain_photo.jpg', p.original);
+        add('trial${n}_encrypted_photo.png', p.protectedPng);
+        add('trial${n}_plain_face.png', p.plainFace);
+        add('trial${n}_encrypted_face.png', p.cipherFace);
+      }
+      final data = ZipEncoder().encode(zip);
+      final saved = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save trial photos',
+        fileName: 'fdae_trial_photos_$stamp.zip',
+        bytes: Uint8List.fromList(data!),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(saved == null && !Platform.isAndroid ? 'Save cancelled.' : 'Photos saved (${_photos.length} trials).')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save photos: $e')));
+    }
+  }
+
   TableRow _row(List<String> c, {bool head = false, String? note}) => TableRow(children: [
         for (var i = 0; i < c.length; i++)
           Padding(
@@ -373,11 +409,13 @@ class _MetricsPageState extends State<MetricsPage> {
           FilledButton(onPressed: _busy ? null : _scale, child: const Text('Scaling + complexity')),
           FilledButton(onPressed: _rows.isEmpty ? null : () => _download(_csv(), 'CSV', 'csv'), child: const Text('Download CSV')),
           FilledButton(onPressed: _rows.isEmpty && _scaling == null ? null : () => _download(_json(), 'JSON', 'json'), child: const Text('Download JSON')),
+          FilledButton(onPressed: _photos.isEmpty ? null : _downloadPhotos, child: const Text('Download photos (ZIP)')),
           TextButton(
               onPressed: _busy
                   ? null
                   : () => setState(() {
                         _rows.clear();
+                        _photos.clear();
                         _skipped = 0;
                         _scaling = null;
                       }),
