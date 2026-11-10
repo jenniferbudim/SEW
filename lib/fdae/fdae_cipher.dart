@@ -12,6 +12,7 @@
 /// strength beyond a bitwise XOR with the chaotic keystream.
 library;
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 class FdaeKeys {
@@ -73,6 +74,28 @@ class _Logistic {
     return _x;
   }
 }
+
+/// Lyapunov exponent of the logistic orbit (mean of ln|r(1-2x)|) over [n] steps after the [n0] warm-up steps.
+/// Positive = chaotic. Near zero or negative = the orbit has fallen onto a short cycle (periodic window, e.g. r~3.83).
+double logisticLyapunov(double z0, double r, {int n0 = 1000, int n = 512}) {
+  var x = z0;
+  for (var i = 0; i < n0; i++) {
+    x = r * x * (1 - x);
+  }
+  var s = 0.0;
+  for (var i = 0; i < n; i++) {
+    final d = (r * (1 - 2 * x)).abs();
+    s += d > 0 ? math.log(d) : -50.0;
+    x = r * x * (1 - x);
+  }
+  return s / n;
+}
+
+/// A (z0, r) pair is WEAK when its logistic orbit is not chaotic. For such keys the keystream is (nearly) periodic and
+/// does not depend on z0, so z0 adds nothing to the key. About 12% of random keys in r in [3.6,4.0] are weak.
+/// Deterministic, so encrypt and decrypt reject exactly the same keys.
+const double kMinLogisticLyapunov = 0.1;
+bool logisticKeyIsWeak(double z0, double r, int n0) => logisticLyapunov(z0, r, n0: n0) <= kMinLogisticLyapunov;
 
 /// eq(4)/(5) then the odd-bit-plane stream (bits 7,5,3,1), length 4*n.
 Uint8List _keystream(double Function() next, int n) {

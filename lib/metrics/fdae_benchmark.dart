@@ -147,15 +147,44 @@ Map<String, double> analyseTrial(TrialInput t, {Map<String, Uint8List>? images})
   final back = _rgb8(img.decodePng(t.restoredPng)!);
   final backRgb = back.getBytes(order: img.ChannelOrder.rgb);
   var same = back.width == imgW && back.height == imgH && backRgb.length == rgb.length;
+  // Diagnostics for a failed round trip: how many bytes differ and the bounding box of the differing pixels.
+  var diffBytes = 0, dx1 = imgW, dy1 = imgH, dx2 = -1, dy2 = -1;
   if (same) {
     for (var i = 0; i < rgb.length; i++) {
       if (rgb[i] != backRgb[i]) {
         same = false;
-        break;
+        diffBytes++;
+        final px = (i ~/ 3) % imgW, py = (i ~/ 3) ~/ imgW;
+        if (px < dx1) dx1 = px;
+        if (py < dy1) dy1 = py;
+        if (px > dx2) dx2 = px;
+        if (py > dy2) dy2 = py;
       }
     }
   }
   row['roundtrip_ok'] = same ? 1.0 : 0.0;
+  row['rt_diff_bytes'] = diffBytes.toDouble();
+  row['rt_diff_x1'] = diffBytes == 0 ? -1 : dx1.toDouble();
+  row['rt_diff_y1'] = diffBytes == 0 ? -1 : dy1.toDouble();
+  row['rt_diff_x2'] = diffBytes == 0 ? -1 : dx2.toDouble();
+  row['rt_diff_y2'] = diffBytes == 0 ? -1 : dy2.toDouble();
+  // Largest overlap (pixels) between any two boxes that protect() encrypted, plus the first two boxes.
+  var maxOverlap = 0;
+  for (var i = 0; i < t.boxes.length; i++) {
+    for (var j = i + 1; j < t.boxes.length; j++) {
+      final A = t.boxes[i], B = t.boxes[j];
+      final ox = math.min(A[2], B[2]) - math.max(A[0], B[0]);
+      final oy = math.min(A[3], B[3]) - math.max(A[1], B[1]);
+      if (ox > 0 && oy > 0 && (ox * oy).toInt() > maxOverlap) maxOverlap = (ox * oy).toInt();
+    }
+  }
+  row['boxes_max_overlap_px'] = maxOverlap.toDouble();
+  for (var k = 0; k < 2 && k < t.boxes.length; k++) {
+    row['box${k}_x1'] = t.boxes[k][0].toDouble();
+    row['box${k}_y1'] = t.boxes[k][1].toDouble();
+    row['box${k}_x2'] = t.boxes[k][2].toDouble();
+    row['box${k}_y2'] = t.boxes[k][3].toDouble();
+  }
 
   // ---- detection time with the model already loaded (median of repeats after a warm-up) ----
   sw
@@ -188,12 +217,18 @@ Map<String, double> analyseTrial(TrialInput t, {Map<String, Uint8List>? images})
   if (take.isEmpty) return row;
 
   final rng = math.Random(t.seed);
-  FdaeKeys randomKeys() => FdaeKeys(
+  // Same screening as deriveFaceKeys: skip keys whose logistic orbit is periodic (z0 would have no effect).
+  FdaeKeys randomKeys() {
+    while (true) {
+      final k = FdaeKeys(
         x0: 0.01 + rng.nextDouble() * 0.98, mu1: 0.05 + rng.nextDouble() * 0.40,
         z0: 0.01 + rng.nextDouble() * 0.98, r: 3.6 + rng.nextDouble() * 0.4,
         y0: 0.01 + rng.nextDouble() * 0.98, mu2: 0.05 + rng.nextDouble() * 0.40,
         n0: t.n0,
       );
+      if (!logisticKeyIsWeak(k.z0, k.r, k.n0)) return k;
+    }
+  }
 
   // ---- encrypt + decrypt every used face, single thread, timed (the app runs the 3 channels in parallel isolates) ----
   var encTotal = 0.0, decTotal = 0.0, faceBytes = 0, roundtrip = true;

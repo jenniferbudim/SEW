@@ -34,17 +34,25 @@ Uint8List keyCheck(Uint8List master) => Uint8List.fromList(
 
 FdaeKeys deriveFaceKeys(Uint8List master, int faceIndex, {int n0 = 1000}) {
   final prf = Hmac(sha256, master);
-  final raw = BytesBuilder();
-  for (var c = 0; c < 2; c++) {
-    raw.add(prf.convert(utf8.encode('fdae-v2|face|$faceIndex|$c')).bytes);
+  // Attempt 0 uses the original labels, so every key that was already good is unchanged. If its logistic (z0, r) pair
+  // is weak (periodic orbit, z0 has no effect), draw again with a '|retry<N>' label. Deterministic: the decrypt side
+  // makes the same choice. Probability of 64 weak draws in a row is negligible.
+  for (var attempt = 0; attempt < 64; attempt++) {
+    final raw = BytesBuilder();
+    for (var c = 0; c < 2; c++) {
+      final label = attempt == 0 ? 'fdae-v2|face|$faceIndex|$c' : 'fdae-v2|face|$faceIndex|$c|retry$attempt';
+      raw.add(prf.convert(utf8.encode(label)).bytes);
+    }
+    final bd = ByteData.sublistView(raw.toBytes());
+    double u(int j) => (bd.getUint64(8 * j) >>> 11) / 9007199254740992.0; // 2^53
+    double m(int j, double lo, double hi) => lo + u(j) * (hi - lo);
+    final keys = FdaeKeys(
+      x0: m(0, 0.01, 0.99), mu1: m(1, 0.05, 0.45),
+      z0: m(2, 0.01, 0.99), r: m(3, 3.6, 4.0),
+      y0: m(4, 0.01, 0.99), mu2: m(5, 0.05, 0.45),
+      n0: n0,
+    );
+    if (!logisticKeyIsWeak(keys.z0, keys.r, n0)) return keys;
   }
-  final bd = ByteData.sublistView(raw.toBytes());
-  double u(int j) => (bd.getUint64(8 * j) >>> 11) / 9007199254740992.0; // 2^53
-  double m(int j, double lo, double hi) => lo + u(j) * (hi - lo);
-  return FdaeKeys(
-    x0: m(0, 0.01, 0.99), mu1: m(1, 0.05, 0.45),
-    z0: m(2, 0.01, 0.99), r: m(3, 3.6, 4.0),
-    y0: m(4, 0.01, 0.99), mu2: m(5, 0.05, 0.45),
-    n0: n0,
-  );
+  throw StateError('could not derive a non-weak key');
 }

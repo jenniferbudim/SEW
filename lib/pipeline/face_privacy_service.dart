@@ -3,11 +3,11 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
-import '../detection/face_box.dart';
-import '../detection/tflite_face_detector.dart';
-import '../fdae/fdae_cipher.dart';
-import '../fdae/key_derivation.dart';
-import '../fdae/png_meta.dart';
+import '../../detection/face_box.dart';
+import '../../detection/tflite_face_detector.dart';
+import '../../fdae/fdae_cipher.dart';
+import '../../fdae/key_derivation.dart';
+import '../../fdae/png_meta.dart';
 
 class WrongPassphraseException implements Exception {
   @override
@@ -75,46 +75,55 @@ img.Image _toRgb8(img.Image im) =>
         ? im
         : im.convert(numChannels: 3, format: img.Format.uint8);
 
-/// Runs [fn] on each of R,G,B for the rect, writing results back into [rgb]
-/// (interleaved, stride = imgW*3). Same key material per channel, as in
-/// pipeline_test.py; ivBit is per channel.
-Map<String, int> _encryptRegion(Uint8List rgb, int imgW, FaceBox b, FdaeKeys keys) {
-  final w = b.width, h = b.height, iv = <String, int>{};
+Future<FdaeCiphertext> _encChannel(Uint8List ch, int h, int w, FdaeKeys k) =>
+    Isolate.run(() => fdaeEncrypt(ch, h, w, k));
+Future<Uint8List> _decChannel(Uint8List ch, int iv, int h, int w, FdaeKeys k) =>
+    Isolate.run(() => fdaeDecrypt(FdaeCiphertext(ch, iv), h, w, k));
+
+Uint8List _extract(Uint8List rgb, int imgW, FaceBox b, int c) {
+  final w = b.width, h = b.height, ch = Uint8List(w * h);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      ch[y * w + x] = rgb[((b.y1 + y) * imgW + b.x1 + x) * 3 + c];
+    }
+  }
+  return ch;
+}
+
+void _writeBack(Uint8List rgb, int imgW, FaceBox b, int c, Uint8List src) {
+  final w = b.width, h = b.height;
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      rgb[((b.y1 + y) * imgW + b.x1 + x) * 3 + c] = src[y * w + x];
+    }
+  }
+}
+
+/// R, G and B of a face box are independent given the same key material
+/// (as in pipeline_test.py), so the three channels run in parallel isolates.
+/// Output is byte-identical to the sequential version; ivBit is per channel.
+Future<Map<String, int>> _encryptRegion(Uint8List rgb, int imgW, FaceBox b, FdaeKeys keys) async {
   const names = ['R', 'G', 'B'];
+  final cts = await Future.wait([
+    for (var c = 0; c < 3; c++) _encChannel(_extract(rgb, imgW, b, c), b.height, b.width, keys)
+  ]);
+  final iv = <String, int>{};
   for (var c = 0; c < 3; c++) {
-    final ch = Uint8List(w * h);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        ch[y * w + x] = rgb[((b.y1 + y) * imgW + b.x1 + x) * 3 + c];
-      }
-    }
-    final ct = fdaeEncrypt(ch, h, w, keys);
-    iv[names[c]] = ct.ivBit;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        rgb[((b.y1 + y) * imgW + b.x1 + x) * 3 + c] = ct.image[y * w + x];
-      }
-    }
+    iv[names[c]] = cts[c].ivBit;
+    _writeBack(rgb, imgW, b, c, cts[c].image);
   }
   return iv;
 }
 
-void _decryptRegion(Uint8List rgb, int imgW, FaceBox b, FdaeKeys keys, Map<String, dynamic> iv) {
-  final w = b.width, h = b.height;
+Future<void> _decryptRegion(
+    Uint8List rgb, int imgW, FaceBox b, FdaeKeys keys, Map<String, dynamic> iv) async {
   const names = ['R', 'G', 'B'];
+  final pts = await Future.wait([
+    for (var c = 0; c < 3; c++)
+      _decChannel(_extract(rgb, imgW, b, c), iv[names[c]] as int, b.height, b.width, keys)
+  ]);
   for (var c = 0; c < 3; c++) {
-    final ch = Uint8List(w * h);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        ch[y * w + x] = rgb[((b.y1 + y) * imgW + b.x1 + x) * 3 + c];
-      }
-    }
-    final pt = fdaeDecrypt(FdaeCiphertext(ch, iv[names[c]] as int), h, w, keys);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        rgb[((b.y1 + y) * imgW + b.x1 + x) * 3 + c] = pt[y * w + x];
-      }
-    }
+    _writeBack(rgb, imgW, b, c, pts[c]);
   }
 }
 
@@ -124,9 +133,33 @@ Uint8List _encodePng(Uint8List rgb, int w, int h) {
   return img.encodePng(im, level: 3);
 }
 
+/// Drops a box that is (almost) completely inside a larger box: the larger box already hides that region, and
+/// encrypting the inner one on top of it only adds work. Partly overlapping boxes are kept; _unprotect undoes them
+/// in reverse order so those restore exactly.
+List<FaceBox> _dropNested(List<FaceBox> f) {
+  int area(FaceBox b) => b.width * b.height;
+  bool inside(FaceBox s, FaceBox big) {
+    final ix = math.min(s.x2, big.x2) - math.max(s.x1, big.x1);
+    final iy = math.min(s.y2, big.y2) - math.max(s.y1, big.y1);
+    return ix > 0 && iy > 0 && ix * iy >= 0.9 * area(s);
+  }
+
+  final out = <FaceBox>[];
+  for (var i = 0; i < f.length; i++) {
+    var drop = false;
+    for (var j = 0; j < f.length && !drop; j++) {
+      if (j == i) continue;
+      final jBigger = area(f[j]) > area(f[i]) || (area(f[j]) == area(f[i]) && j < i);
+      if (jBigger && inside(f[i], f[j])) drop = true;
+    }
+    if (!drop) out.add(f[i]);
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ protect
-ProtectResult _protect(Uint8List fileBytes, String pass, Uint8List model,
-    DetectorKind kind, int n0, int iterations, double? conf) {
+Future<ProtectResult> _protect(Uint8List fileBytes, String pass, Uint8List model,
+    DetectorKind kind, int n0, int iterations, double? conf) async {
   final total = Stopwatch()..start();
   final sw = Stopwatch()..start();
   final t = <String, int>{};
@@ -143,12 +176,13 @@ ProtectResult _protect(Uint8List fileBytes, String pass, Uint8List model,
   lap('decode');
 
   final detector = TfliteFaceDetector.fromBuffer(model, kind: kind, confThreshold: conf);
-  final List<FaceBox> faces;
+  final List<FaceBox> detected;
   try {
-    faces = detector.detect(decoded);
+    detected = detector.detect(decoded);
   } finally {
     detector.close();
   }
+  final faces = _dropNested(detected);
   lap('detect');
 
   final rgb = Uint8List.fromList(decoded.getBytes(order: img.ChannelOrder.rgb));
@@ -160,7 +194,7 @@ ProtectResult _protect(Uint8List fileBytes, String pass, Uint8List model,
   final entries = <Map<String, dynamic>>[];
   for (var i = 0; i < faces.length; i++) {
     final b = faces[i];
-    final iv = _encryptRegion(rgb, w, b, deriveFaceKeys(master, i, n0: n0));
+    final iv = await _encryptRegion(rgb, w, b, deriveFaceKeys(master, i, n0: n0));
     entries.add({
       'bbox': {'x1': b.x1, 'y1': b.y1, 'x2': b.x2, 'y2': b.y2},
       'iv_bits': iv,
@@ -185,7 +219,7 @@ ProtectResult _protect(Uint8List fileBytes, String pass, Uint8List model,
 }
 
 // ------------------------------------------------------------------ unprotect
-UnprotectResult _unprotect(Uint8List pngBytes, String pass) {
+Future<UnprotectResult> _unprotect(Uint8List pngBytes, String pass) async {
   final total = Stopwatch()..start();
   final sw = Stopwatch()..start();
   final t = <String, int>{};
@@ -218,10 +252,12 @@ UnprotectResult _unprotect(Uint8List pngBytes, String pass) {
   lap('decode');
   final n0 = m['n0'] as int;
   final faces = (m['faces'] as List).cast<Map<String, dynamic>>();
-  for (var i = 0; i < faces.length; i++) {
+  // Undo in REVERSE order: protect() encrypts face 0, then face 1, ... If two boxes overlap, face 1 was encrypted over
+  // pixels that face 0 had already changed, so face 1 must be undone first. (Boxes that do not overlap are unaffected.)
+  for (var i = faces.length - 1; i >= 0; i--) {
     final bb = faces[i]['bbox'] as Map<String, dynamic>;
     final box = FaceBox(bb['x1'] as int, bb['y1'] as int, bb['x2'] as int, bb['y2'] as int);
-    _decryptRegion(rgb, w, box, deriveFaceKeys(master, i, n0: n0),
+    await _decryptRegion(rgb, w, box, deriveFaceKeys(master, i, n0: n0),
         faces[i]['iv_bits'] as Map<String, dynamic>);
   }
   lap('decrypt');

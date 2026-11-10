@@ -152,9 +152,9 @@ class MetricsPage extends StatefulWidget {
 class _MetricsPageState extends State<MetricsPage> {
   static const _secret = 'bench-secret-not-a-real-key'; // local only; the real app derives it from the cloud key
   final _rows = <Map<String, double>>[];
-  // Per trial: original photo (JPEG), full protected PNG, plaintext face crop, encrypted face crop.
+  // Per trial: original photo (JPEG), full protected PNG, decrypted (restored) PNG, plaintext face crop, encrypted face crop.
   final _photos =
-      <({Uint8List original, String ext, Uint8List protectedPng, Uint8List? plainFace, Uint8List? cipherFace})>[];
+      <({Uint8List original, String ext, Uint8List protectedPng, Uint8List restoredPng, Uint8List? plainFace, Uint8List? cipherFace})>[];
   final _sources = <String>[]; // one per trial: 'camera' or the file name inside the uploaded ZIP
   final _skippedNames = <String>[]; // photos that were not counted, with the reason
   bool _batch = false, _stop = false;
@@ -216,7 +216,7 @@ class _MetricsPageState extends State<MetricsPage> {
     row['n_faces_detected'] = p.faces.length.toDouble();
     _rows.add(row);
     _sources.add(source);
-    _photos.add((original: photo, ext: ext, protectedPng: p.png, plainFace: res.plainFacePng, cipherFace: res.cipherFacePng));
+    _photos.add((original: photo, ext: ext, protectedPng: p.png, restoredPng: u.png, plainFace: res.plainFacePng, cipherFace: res.cipherFacePng));
     return (
       counted: true,
       message: 'Trial ${_rows.length} done (${p.faces.length} face(s), total ${row['total_ms']!.toStringAsFixed(0)} ms).'
@@ -370,9 +370,7 @@ class _MetricsPageState extends State<MetricsPage> {
               kind: [
                 for (var c = 0; c < 3; c++)
                   [for (var b = 0; b < 256; b++) (r['h_${kind == 'plain' ? 'p' : 'c'}${c}_$b'] ?? 0).toInt()]
-              ],
-            for (final kind in const ['plain', 'cipher'])
-              '${kind}_gray': [for (var b = 0; b < 256; b++) (r['h_${kind == 'plain' ? 'p' : 'c'}g_$b'] ?? 0).toInt()]
+              ]
           }
       ];
 
@@ -423,7 +421,7 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   /// All trial photos in one ZIP: trial01_plain_photo.jpg, trial01_encrypted_photo.png (whole frame as the app
-  /// protects it), trial01_plain_face.png, trial01_encrypted_face.png (the measured face crop).
+  /// protects it), trial01_decrypted_photo.png (the same frame after restoring it with the key), trial01_plain_face.png, trial01_encrypted_face.png (the measured face crop).
   Future<void> _downloadPhotos() async {
     final stamp = DateTime.now().toIso8601String().substring(0, 19).replaceAll(RegExp('[:T]'), '-');
     try {
@@ -436,6 +434,7 @@ class _MetricsPageState extends State<MetricsPage> {
         final p = _photos[i];
         add('trial${n}_plain_photo.${p.ext}', p.original);
         add('trial${n}_encrypted_photo.png', p.protectedPng);
+        add('trial${n}_decrypted_photo.png', p.restoredPng);
         add('trial${n}_plain_face.png', p.plainFace);
         add('trial${n}_encrypted_face.png', p.cipherFace);
       }

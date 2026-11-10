@@ -131,7 +131,7 @@ LivenessResult _work(_Job j, Uint8List frame) {
   for (var i = 0; i < input.length; i++) {
     input[i] = rgb[i] / 255.0;
   }
-  final interp = Interpreter.fromBuffer(j.spoofModel, options: InterpreterOptions()..threads = 2);
+  final interp = Interpreter.fromBuffer(j.spoofModel, options: InterpreterOptions()..threads = 4);
   double score;
   try {
     interp.getInputTensor(0).data = input.buffer.asUint8List();

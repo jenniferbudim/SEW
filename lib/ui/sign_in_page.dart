@@ -28,6 +28,7 @@ class SignInPage extends StatefulWidget {
 
 class _SignInPageState extends State<SignInPage> {
   FaceAuthService? _svc;
+  Future<FaceAuthService>? _svcFuture; // one shared build, so warm-up and the first attempt never build twice
   AttemptLimiter? _limiter;
   LimiterState _lim = LimiterState.none;
   Timer? _tick;
@@ -58,6 +59,23 @@ class _SignInPageState extends State<SignInPage> {
     super.dispose();
   }
 
+  /// Builds the face service (key from the key service + the three model files). Used by the warm-up and by the first
+  /// attempt; whichever comes first starts the build and the other one waits for the same result.
+  Future<FaceAuthService> _service() => _svcFuture ??= buildCloudService().then((s) {
+        _svc = s;
+        return s;
+      }, onError: (Object e) {
+        _svcFuture = null; // let the next attempt try again (and show the real error)
+        throw e;
+      });
+
+  /// Runs while the user is still framing the photo. Never throws; a failure is simply retried on the first attempt.
+  /// Skipped when the account is locked or switched to password only: no point fetching the key then.
+  void _warmUp() {
+    if (_svc != null || _svcFuture != null) return;
+    _service().then<void>((_) {}, onError: (Object e) => debugPrint('Warm-up skipped: $e'));
+  }
+
   Future<void> _checkTemplate() async {
     if (await LogoutFlag.isSet()) {
       // the user logged out on purpose: drop any leftover session so the email + password step is shown
@@ -78,6 +96,7 @@ class _SignInPageState extends State<SignInPage> {
         _needPassword = st.disabled;
       });
       _setLim(st);
+      if (rec != null && !st.disabled && !st.locked) _warmUp();
     } catch (e) {
       if (mounted) setState(() => _loadError = 'Could not reach the cloud: $e');
     }
@@ -134,7 +153,7 @@ class _SignInPageState extends State<SignInPage> {
     }
     FaceAuthService? svc;
     try {
-      final s = _svc ??= await buildCloudService();
+      final s = await _service();
       svc = s;
       final r = await s.verify(userId: u.uid, frame: jpeg);
       final score = r.scores.isEmpty ? null : r.scores.first;
@@ -187,6 +206,7 @@ class _SignInPageState extends State<SignInPage> {
       return '$e';
     } catch (e) {
       _svc = null;
+      _svcFuture = null;
       return 'Error: $e';
     }
   }
