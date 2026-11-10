@@ -15,7 +15,7 @@ class TfliteFaceDetector {
     this.confThreshold,
     this.iouThreshold = 0.5,
     this.boxMargin = 0.10,
-    int threads = 2,
+    int threads = 4,
   }) : _interp = Interpreter.fromBuffer(modelBytes,
             options: InterpreterOptions()..threads = threads) {
     final s = _interp.getInputTensor(0).shape; // [1,H,W,3] or [1,3,H,W]

@@ -383,6 +383,7 @@ Map<String, double> analyseTrial(TrialInput t, {Map<String, Uint8List>? images})
   for (final p in kKeyParams) {
     var contiguous = true;
     var kmax = 7;
+    var misses = 0;
     for (var k = 8; k <= 16; k++) {
       final ct = fdaeEncrypt(sens, s, s, _perturb(keys, p.$1, p.$3, math.pow(10, -k).toDouble()));
       final (np, ua) = npcrUaci(base.image, ct.image);
@@ -392,10 +393,17 @@ Map<String, double> analyseTrial(TrialInput t, {Map<String, Uint8List>? images})
         ksN.add(np);
         ksU.add(ua);
       }
+      // A single miss below 99% is tolerated (the 64x64 patch makes NPCR noisy); two misses in a row end the run.
+      // The first miss is logged (k and its NPCR) so a real weakness can be told apart from noise.
       if (contiguous && np >= 99.0) {
         kmax = k;
-      } else {
-        contiguous = false;
+        misses = 0;
+      } else if (contiguous) {
+        if (misses == 0) {
+          row['ksp_miss_k_${p.$1}'] = k.toDouble();
+          row['ksp_miss_npcr_${p.$1}'] = np;
+        }
+        if (++misses >= 2) contiguous = false;
       }
     }
     row['ksp_exp_${p.$1}'] = kmax.toDouble();

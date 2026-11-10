@@ -370,7 +370,10 @@ class _MetricsPageState extends State<MetricsPage> {
               kind: [
                 for (var c = 0; c < 3; c++)
                   [for (var b = 0; b < 256; b++) (r['h_${kind == 'plain' ? 'p' : 'c'}${c}_$b'] ?? 0).toInt()]
-              ]
+              ],
+            // true gray (BT.601 luma) histograms, written by the benchmark as h_pg_* / h_cg_*
+            'plain_gray': [for (var b = 0; b < 256; b++) (r['h_pg_$b'] ?? 0).toInt()],
+            'cipher_gray': [for (var b = 0; b < 256; b++) (r['h_cg_$b'] ?? 0).toInt()],
           }
       ];
 

@@ -12,7 +12,7 @@ import 'align.dart';
 /// Wrong values still "run" but accuracy collapses -- check with known pairs.
 class TfliteFaceEmbedder {
   TfliteFaceEmbedder.fromBuffer(Uint8List model,
-      {this.mean = 127.5, this.std = 127.5, this.bgr = false, int threads = 2})
+      {this.mean = 127.5, this.std = 127.5, this.bgr = false, int threads = 4})
       : _interp = Interpreter.fromBuffer(model, options: InterpreterOptions()..threads = threads) {
     final s = _interp.getInputTensor(0).shape;
     _batch = s[0]; // the MobileFaceNet file we ship has a FIXED batch of 2: feed the chip twice, use row 0
