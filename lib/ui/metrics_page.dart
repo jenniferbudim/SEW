@@ -1,11 +1,14 @@
 import 'dart:convert';
-import 'dart:io' show Platform, ProcessInfo;
+import 'dart:io' show File, Platform, ProcessInfo;
+import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' hide Summary;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import '../camera_capture.dart';
 import '../face_config.dart';
 import '../face_privacy.dart';
@@ -18,6 +21,42 @@ const bool kShowMetrics = true;
 
 /// Detector confidence used for the measurements. KEEP EQUAL to the value in protect_demo.dart (confThreshold).
 const double kBenchConf = 0.15;
+
+/// Uploaded photos are shrunk so their longest side is at most this many pixels, to match what the app itself captures
+/// (the camera's "high" preset is 1280x720). Full 12 MP photos would give much slower and much larger measurements and
+/// can run the phone out of memory. 0 = use the uploaded photos as they are.
+const int kUploadMaxSide = 1280;
+
+/// At most this many photos are processed from one ZIP (the rest are ignored).
+const int kMaxUploadPhotos = 100;
+
+bool _isImageName(String n) {
+  final b = n.split('/').last.toLowerCase();
+  if (b.startsWith('.') || n.contains('__MACOSX')) return false;
+  return b.endsWith('.jpg') || b.endsWith('.jpeg') || b.endsWith('.png') || b.endsWith('.bmp');
+}
+
+String _extOf(String n) {
+  final e = n.split('.').last.toLowerCase();
+  return e == 'jpeg' ? 'jpg' : e;
+}
+
+/// Top level on purpose: the closure given to Isolate.run must not capture the page (State) object.
+Future<({Uint8List bytes, bool resized})> _fitInIsolate(Uint8List raw) => Isolate.run(() => _fitPhoto(raw, kUploadMaxSide));
+
+/// Runs in a background isolate: shrinks [b] if its longest side is above [maxSide] (re-encoded as JPEG, quality 95).
+({Uint8List bytes, bool resized}) _fitPhoto(Uint8List b, int maxSide) {
+  if (maxSide <= 0) return (bytes: b, resized: false);
+  var im = img.decodeImage(b);
+  if (im == null) throw const FormatException('Unsupported or corrupt image');
+  im = img.bakeOrientation(im);
+  final m = math.max(im.width, im.height);
+  if (m <= maxSide) return (bytes: b, resized: false);
+  final k = maxSide / m;
+  im = img.copyResize(im,
+      width: (im.width * k).round(), height: (im.height * k).round(), interpolation: img.Interpolation.linear);
+  return (bytes: Uint8List.fromList(img.encodeJpg(im, quality: 95)), resized: true);
+}
 
 class _M {
   const _M(this.key, this.label, {this.note = '', this.dec = 2});
@@ -114,12 +153,78 @@ class _MetricsPageState extends State<MetricsPage> {
   static const _secret = 'bench-secret-not-a-real-key'; // local only; the real app derives it from the cloud key
   final _rows = <Map<String, double>>[];
   // Per trial: original photo (JPEG), full protected PNG, plaintext face crop, encrypted face crop.
-  final _photos = <({Uint8List original, Uint8List protectedPng, Uint8List? plainFace, Uint8List? cipherFace})>[];
+  final _photos =
+      <({Uint8List original, String ext, Uint8List protectedPng, Uint8List? plainFace, Uint8List? cipherFace})>[];
+  final _sources = <String>[]; // one per trial: 'camera' or the file name inside the uploaded ZIP
+  final _skippedNames = <String>[]; // photos that were not counted, with the reason
+  bool _batch = false, _stop = false;
   int _skipped = 0;
   Map<String, dynamic>? _scaling;
   bool _busy = false;
-  String _status = 'Take one photo per trial. For the thesis use about 30 different photos '
+  String _status = 'Take one photo per trial, or upload a ZIP of photos. For the thesis use about 30 different photos '
       '(different pose, light, distance), like the 30 trials of the PC benchmark.';
+
+  /// Protect + restore + measure ONE photo and store the result. Throws on an unreadable photo.
+  /// Returns whether the trial was counted, and a message.
+  Future<({bool counted, String message})> _runTrial(Uint8List photo, String source,
+      {required String ext, required Uint8List model, required FacePrivacyService svc, String? label}) async {
+    final tag = label ?? 'Trial ${_rows.length + 1}';
+    final rssBefore = ProcessInfo.currentRss;
+    final wall = Stopwatch()..start();
+    final p = await svc.protect(photo, _secret);
+    if (p.faces.isEmpty) {
+      _skipped++;
+      _skippedNames.add('$source: no face found');
+      return (counted: false, message: 'No face found in that photo, so the trial was skipped (not counted).');
+    }
+    final u = await svc.unprotect(p.png, _secret);
+    final wallMs = wall.elapsedMilliseconds;
+    if (mounted) setState(() => _status = '$tag: measuring NPCR, entropy, key sensitivity ... (can take up to a minute)');
+    final res = await runAnalysisWithImages(TrialInput(
+      photo: photo,
+      restoredPng: u.png,
+      model: model,
+      kind: kDetectorKind,
+      conf: kBenchConf,
+      boxes: [for (final f in p.faces) [f.x1, f.y1, f.x2, f.y2]],
+      seed: 1000 + _rows.length,
+    ));
+    final row = res.row;
+    if ((row['n_faces'] ?? 0) == 0) {
+      _skipped++;
+      _skippedNames.add('$source: face smaller than 32 px');
+      return (counted: false, message: 'The face was smaller than 32 px, so the trial was skipped. Move closer.');
+    }
+    final pt = p.timingsMs, ut = u.timingsMs;
+    double d(int? v) => (v ?? 0).toDouble();
+    row['decode_ms'] = d(pt['decode']);
+    row['detect_cold_ms'] = d(pt['detect']);
+    row['enc_pipeline_ms'] = d(pt['encrypt']);
+    row['png_encode_ms'] = d(pt['png_encode']);
+    row['protect_total_ms'] = d(pt['total']);
+    row['dec_pipeline_ms'] = d(ut['decrypt']);
+    row['unprotect_total_ms'] = d(ut['total']);
+    row['total_ms'] = d(pt['total']) + d(ut['total']);
+    row['wall_ms'] = wallMs.toDouble();
+    row['fps_detect_warm'] = 1000.0 / row['detect_warm_ms']!;
+    row['fps_protect'] = 1000.0 / d(pt['total']).clamp(1, double.infinity);
+    row['mpx_per_s_protect'] =
+        row['img_w']! * row['img_h']! / 1e6 / (d(pt['total']).clamp(1, double.infinity) / 1000.0);
+    row['rss_before_mb'] = rssBefore / 1048576.0;
+    row['input_kb'] = photo.length / 1024.0;
+    row['png_kb'] = p.png.length / 1024.0;
+    row['n_faces_detected'] = p.faces.length.toDouble();
+    _rows.add(row);
+    _sources.add(source);
+    _photos.add((original: photo, ext: ext, protectedPng: p.png, plainFace: res.plainFacePng, cipherFace: res.cipherFacePng));
+    return (
+      counted: true,
+      message: 'Trial ${_rows.length} done (${p.faces.length} face(s), total ${row['total_ms']!.toStringAsFixed(0)} ms).'
+    );
+  }
+
+  Future<FacePrivacyService> _newService(Uint8List model) async => FacePrivacyService(
+      modelBytes: model, kind: kDetectorKind, pbkdf2Iterations: 1, confThreshold: kBenchConf);
 
   Future<void> _trial() async {
     final photo = await captureFromCamera(context,
@@ -131,61 +236,80 @@ class _MetricsPageState extends State<MetricsPage> {
     });
     try {
       final model = (await rootBundle.load(kDetectorAsset)).buffer.asUint8List();
-      final svc = FacePrivacyService(
-          modelBytes: model, kind: kDetectorKind, pbkdf2Iterations: 1, confThreshold: kBenchConf);
-      final rssBefore = ProcessInfo.currentRss;
-      final wall = Stopwatch()..start();
-      final p = await svc.protect(photo, _secret);
-      if (p.faces.isEmpty) {
-        _skipped++;
-        _status = 'No face found in that photo, so the trial was skipped (not counted).';
-        return;
-      }
-      final u = await svc.unprotect(p.png, _secret);
-      final wallMs = wall.elapsedMilliseconds;
-      if (mounted) setState(() => _status = 'Trial ${_rows.length + 1}: measuring NPCR, entropy, key sensitivity ... (can take up to a minute)');
-      final res = await runAnalysisWithImages(TrialInput(
-        photo: photo,
-        restoredPng: u.png,
-        model: model,
-        kind: kDetectorKind,
-        conf: kBenchConf,
-        boxes: [for (final f in p.faces) [f.x1, f.y1, f.x2, f.y2]],
-        seed: 1000 + _rows.length,
-      ));
-      final row = res.row;
-      if ((row['n_faces'] ?? 0) == 0) {
-        _skipped++;
-        _status = 'The face was smaller than 32 px, so the trial was skipped. Move closer.';
-        return;
-      }
-      final pt = p.timingsMs, ut = u.timingsMs;
-      double d(int? v) => (v ?? 0).toDouble();
-      row['decode_ms'] = d(pt['decode']);
-      row['detect_cold_ms'] = d(pt['detect']);
-      row['enc_pipeline_ms'] = d(pt['encrypt']);
-      row['png_encode_ms'] = d(pt['png_encode']);
-      row['protect_total_ms'] = d(pt['total']);
-      row['dec_pipeline_ms'] = d(ut['decrypt']);
-      row['unprotect_total_ms'] = d(ut['total']);
-      row['total_ms'] = d(pt['total']) + d(ut['total']);
-      row['wall_ms'] = wallMs.toDouble();
-      row['fps_detect_warm'] = 1000.0 / row['detect_warm_ms']!;
-      row['fps_protect'] = 1000.0 / d(pt['total']).clamp(1, double.infinity);
-      row['mpx_per_s_protect'] =
-          row['img_w']! * row['img_h']! / 1e6 / (d(pt['total']).clamp(1, double.infinity) / 1000.0);
-      row['rss_before_mb'] = rssBefore / 1048576.0;
-      row['input_kb'] = photo.length / 1024.0;
-      row['png_kb'] = p.png.length / 1024.0;
-      row['n_faces_detected'] = p.faces.length.toDouble();
-      _rows.add(row);
-      _photos.add((original: photo, protectedPng: p.png, plainFace: res.plainFacePng, cipherFace: res.cipherFacePng));
-      _status = 'Trial ${_rows.length} done (${p.faces.length} face(s), '
-          'total ${row['total_ms']!.toStringAsFixed(0)} ms). Take the next photo.';
+      final r = await _runTrial(photo, 'camera', ext: 'jpg', model: model, svc: await _newService(model));
+      _status = r.counted ? '${r.message} Take the next photo.' : r.message;
     } catch (e) {
       _status = 'Trial failed: $e';
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Pick a ZIP of photos and run every photo through the same trial as the camera does (protect, restore, all the
+  /// measurements). Results are added to the same table, so CSV / JSON / photo ZIP / scaling work as usual afterwards.
+  Future<void> _uploadZip() async {
+    FilePickerResult? pick;
+    try {
+      pick = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: const ['zip'], withData: true);
+    } catch (e) {
+      setState(() => _status = 'Could not open the file picker: $e');
+      return;
+    }
+    if (pick == null || pick.files.isEmpty || !mounted) return;
+    setState(() {
+      _busy = true;
+      _batch = true;
+      _stop = false;
+      _status = 'Reading the ZIP ...';
+    });
+    var counted = 0, skippedNow = 0;
+    try {
+      final f = pick.files.single;
+      final zipBytes = f.bytes ?? (f.path != null ? await File(f.path!).readAsBytes() : null);
+      if (zipBytes == null) throw 'the file could not be read';
+      final all = ZipDecoder().decodeBytes(zipBytes);
+      final files = [for (final e in all.files) if (e.isFile && _isImageName(e.name)) e]
+        ..sort((a, b) => a.name.compareTo(b.name));
+      if (files.isEmpty) {
+        _status = 'No photos (.jpg, .jpeg, .png, .bmp) found in that ZIP.';
+        return;
+      }
+      final extra = files.length > kMaxUploadPhotos ? files.length - kMaxUploadPhotos : 0;
+      final todo = files.take(kMaxUploadPhotos).toList();
+      final model = (await rootBundle.load(kDetectorAsset)).buffer.asUint8List();
+      final svc = await _newService(model);
+      for (var i = 0; i < todo.length; i++) {
+        if (_stop || !mounted) break;
+        final e = todo[i];
+        final label = 'Photo ${i + 1}/${todo.length} (${e.name.split('/').last})';
+        if (mounted) setState(() => _status = '$label: protect + restore ...');
+        try {
+          final dynamic c = e.content;
+          final raw = c is Uint8List ? c : Uint8List.fromList((c as List).cast<int>());
+          final fit = await _fitInIsolate(raw);
+          final r = await _runTrial(fit.bytes, e.name,
+              ext: fit.resized ? 'jpg' : _extOf(e.name), model: model, svc: svc, label: label);
+          if (r.counted) {
+            counted++;
+          } else {
+            skippedNow++;
+          }
+        } catch (err) {
+          _skipped++;
+          skippedNow++;
+          _skippedNames.add('${e.name}: could not be processed ($err)');
+        }
+      }
+      _status = 'Upload finished: $counted photo(s) counted, $skippedNow skipped'
+          '${_stop ? ' (stopped early)' : ''}${extra > 0 ? ', $extra more in the ZIP were ignored (limit $kMaxUploadPhotos)' : ''}. '
+          'Skipped photos are listed in the JSON under config.skipped_files.';
+    } catch (e) {
+      _status = 'Upload failed: $e';
+    } finally {
+      if (mounted) setState(() {
+        _busy = false;
+        _batch = false;
+      });
     }
   }
 
@@ -224,14 +348,14 @@ class _MetricsPageState extends State<MetricsPage> {
 
   String _csv() {
     final keys = [for (final g in _groups) for (final m in g.$2) m.key, ..._extraCsv];
-    final b = StringBuffer('trial,${keys.join(',')}\n');
+    final b = StringBuffer('trial,${keys.join(',')},source\n');
     for (var i = 0; i < _rows.length; i++) {
       b.write('${i + 1}');
       for (final k in keys) {
         final v = _rows[i][k];
         b.write(',${v == null || v.isNaN ? '' : (v.isInfinite ? 'inf' : v)}');
       }
-      b.write('\n');
+      b.write(',"${(i < _sources.length ? _sources[i] : '').replaceAll('"', '""')}"\n');
     }
     return b.toString();
   }
@@ -246,7 +370,9 @@ class _MetricsPageState extends State<MetricsPage> {
               kind: [
                 for (var c = 0; c < 3; c++)
                   [for (var b = 0; b < 256; b++) (r['h_${kind == 'plain' ? 'p' : 'c'}${c}_$b'] ?? 0).toInt()]
-              ]
+              ],
+            for (final kind in const ['plain', 'cipher'])
+              '${kind}_gray': [for (var b = 0; b < 256; b++) (r['h_${kind == 'plain' ? 'p' : 'c'}g_$b'] ?? 0).toInt()]
           }
       ];
 
@@ -263,13 +389,19 @@ class _MetricsPageState extends State<MetricsPage> {
           'sens_patch': 64,
           'trials': _rows.length,
           'skipped': _skipped,
+          'skipped_files': _skippedNames,
+          'upload_max_side': kUploadMaxSide,
         },
         'keyspace_theoretical_log2': theoreticalKeyspaceLog2(),
         'summary': {for (final e in _summaries().entries) e.key: e.value.toJson()},
         'scaling': _scaling,
         'histograms': _histograms(),
         'rows': [
-          for (final r in _rows) {for (final e in r.entries) if (!_isHist(e.key)) e.key: e.value}
+          for (var i = 0; i < _rows.length; i++)
+            <String, Object>{
+              for (final e in _rows[i].entries) if (!_isHist(e.key)) e.key: e.value,
+              'source': i < _sources.length ? _sources[i] : '',
+            }
         ],
       }));
 
@@ -302,11 +434,16 @@ class _MetricsPageState extends State<MetricsPage> {
       for (var i = 0; i < _photos.length; i++) {
         final n = (i + 1).toString().padLeft(2, '0');
         final p = _photos[i];
-        add('trial${n}_plain_photo.jpg', p.original);
+        add('trial${n}_plain_photo.${p.ext}', p.original);
         add('trial${n}_encrypted_photo.png', p.protectedPng);
         add('trial${n}_plain_face.png', p.plainFace);
         add('trial${n}_encrypted_face.png', p.cipherFace);
       }
+      final src = StringBuffer('trial,source\n');
+      for (var i = 0; i < _sources.length; i++) {
+        src.write('${i + 1},"${_sources[i].replaceAll('"', '""')}"\n');
+      }
+      add('trial_sources.csv', Uint8List.fromList(utf8.encode(src.toString())));
       final data = ZipEncoder().encode(zip);
       final saved = await FilePicker.platform.saveFile(
         dialogTitle: 'Save trial photos',
@@ -406,6 +543,8 @@ class _MetricsPageState extends State<MetricsPage> {
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           FilledButton(onPressed: _busy ? null : _trial, child: const Text('Take trial photo')),
+          FilledButton(onPressed: _busy ? null : _uploadZip, child: const Text('Upload trial photos (ZIP)')),
+          if (_batch) OutlinedButton(onPressed: _stop ? null : () => setState(() => _stop = true), child: const Text('Stop after this photo')),
           FilledButton(onPressed: _busy ? null : _scale, child: const Text('Scaling + complexity')),
           FilledButton(onPressed: _rows.isEmpty ? null : () => _download(_csv(), 'CSV', 'csv'), child: const Text('Download CSV')),
           FilledButton(onPressed: _rows.isEmpty && _scaling == null ? null : () => _download(_json(), 'JSON', 'json'), child: const Text('Download JSON')),
@@ -416,6 +555,8 @@ class _MetricsPageState extends State<MetricsPage> {
                   : () => setState(() {
                         _rows.clear();
                         _photos.clear();
+                        _sources.clear();
+                        _skippedNames.clear();
                         _skipped = 0;
                         _scaling = null;
                       }),

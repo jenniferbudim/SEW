@@ -60,26 +60,37 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
     }
   }
 
+  /// Resolutions tried in order. Some phones (typically the front camera of mid-range models) cannot run a 720p preview
+  /// together with a photo capture and fail with "No supported surface combination is found"; a lower resolution works.
+  static const _presets = [ResolutionPreset.high, ResolutionPreset.medium, ResolutionPreset.low];
+
   Future<void> _open(CameraDescription cam) async {
-    // "high" (~720p) on purpose: far faster to decode/encrypt than the max resolution
-    final c = CameraController(cam, ResolutionPreset.high, enableAudio: false);
-    try {
-      await c.initialize();
-    } on CameraException catch (e) {
-      await c.dispose();
-      _showError(e);
+    CameraException? last;
+    for (var i = 0; i < _presets.length; i++) {
+      final c = CameraController(cam, _presets[i], enableAudio: false);
+      try {
+        await c.initialize();
+      } on CameraException catch (e) {
+        last = e;
+        await c.dispose();
+        if (e.code.startsWith('CameraAccess')) break; // permission problem: a lower resolution will not help
+        if (!mounted) return;
+        await Future<void>.delayed(const Duration(milliseconds: 400)); // let the camera release before the next try
+        continue;
+      }
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      setState(() {
+        _c = c;
+        _lens = cam.lensDirection;
+        _error = null;
+        _switching = false;
+      });
       return;
     }
-    if (!mounted) {
-      await c.dispose();
-      return;
-    }
-    setState(() {
-      _c = c;
-      _lens = cam.lensDirection;
-      _error = null;
-      _switching = false;
-    });
+    _showError(last!);
   }
 
   void _showError(CameraException e) {
@@ -90,6 +101,15 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
           ? 'Camera permission denied. Enable it for this app in the phone settings.'
           : 'Camera error: ${e.code} ${e.description ?? ''}';
     });
+  }
+
+  /// "Try again" on the error text: reopen the camera without leaving the screen.
+  Future<void> _retry() async {
+    setState(() {
+      _error = null;
+      _c = null;
+    });
+    await _init();
   }
 
   /// Release the current camera FIRST, then open the other one.
@@ -163,7 +183,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
         ],
       ),
       body: _error != null
-          ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
+          ? Center(
+              child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(_error!, textAlign: TextAlign.center, maxLines: 6, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 12),
+                    OutlinedButton(onPressed: _retry, child: const Text('Try again')),
+                  ])))
           : c == null
               ? const Center(child: CircularProgressIndicator())
               : Stack(alignment: Alignment.topCenter, children: [

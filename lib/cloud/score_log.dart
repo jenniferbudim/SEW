@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import '../face_config.dart' show kDetectorKind;
 
 /// Turn off (false) to stop writing scores to Firestore.
 const bool kLogScores = true;
@@ -24,6 +25,10 @@ void logScore({
   int? failCount, // consecutive failed attempts after this one
 }) {
   if (!kLogScores) return;
+  // Every row is tagged with the face detector of THIS build ("...|det=yolov7"), so rows from the YOLO26n-pose app and
+  // the YOLOv7 app can be told apart in the shared faceLogs collection. Goes into the existing liveMode field, so the
+  // Firestore rules do not change.
+  final taggedMode = '${liveMode ?? "-"}|det=${kDetectorKind.name}';
   final u = FirebaseAuth.instance.currentUser;
   if (u == null) return;
   FirebaseFirestore.instance.collection('faceLogs').add({
@@ -38,7 +43,7 @@ void logScore({
     'liveScore': liveScore,
     'sharpness': sharpness,
     'liveVerdict': liveVerdict,
-    'liveMode': liveMode,
+    'liveMode': taggedMode,
     'failCount': failCount,
     'createdAt': FieldValue.serverTimestamp(),
   }).then<void>((_) {}, onError: (Object e) => debugPrint('Score log failed: $e'));

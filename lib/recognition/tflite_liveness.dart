@@ -18,12 +18,13 @@ import 'liveness.dart';
 import 'liveness_config.dart';
 
 class LivenessResult {
-  const LivenessResult({required this.live, this.score, this.sharpness, this.reason, this.faceFound = true});
+  const LivenessResult({required this.live, this.score, this.sharpness, this.reason, this.faceFound = true, this.cropScale});
   final bool live;
   final double? score; // spoof score, lower = more live (null if no face / not run)
   final int? sharpness; // Laplacian count on the 256x256 crop
   final String? reason; // human-readable, when live == false
   final bool faceFound;
+  final double? cropScale; // crop margin factor that was used (see kLiveCropScale)
 
   /// Reason label for the score log: 'live' | 'spoof' (model score too high) | 'too-blurry' (sharpness gate, the
   /// model was not run) | 'error' (the check could not run).
@@ -31,10 +32,10 @@ class LivenessResult {
 }
 
 class _Job {
-  _Job(this.detModel, this.kind, this.detConf, this.spoofModel, this.threshold, this.minSharpness);
+  _Job(this.detModel, this.kind, this.detConf, this.spoofModel, this.threshold, this.minSharpness, this.cropScale);
   final Uint8List detModel, spoofModel;
   final DetectorKind kind;
-  final double detConf, threshold;
+  final double detConf, threshold, cropScale;
   final int minSharpness;
 }
 
@@ -59,7 +60,7 @@ class TfliteLiveness implements LivenessCheck {
   LivenessResult? last;
 
   Future<LivenessResult> evaluate(Uint8List frame) {
-    final j = _Job(detectorModel, detectorKind, detectorConf, spoofModel, threshold, minSharpness);
+    final j = _Job(detectorModel, detectorKind, detectorConf, spoofModel, threshold, minSharpness, liveCropScale);
     return Isolate.run(() => _work(j, frame));
   }
 
@@ -111,7 +112,7 @@ LivenessResult _work(_Job j, Uint8List frame) {
 
   // Square crop around the largest face, kept inside the image (as the author's limitSquare does).
   final b = good.first;
-  var side = math.max(b.width, b.height);
+  var side = (math.max(b.width, b.height) * j.cropScale).round();
   side = math.min(side, math.min(im.width, im.height));
   final cx = (b.x1 + b.x2) ~/ 2, cy = (b.y1 + b.y2) ~/ 2;
   final x0 = (cx - side ~/ 2).clamp(0, im.width - side);
@@ -122,7 +123,8 @@ LivenessResult _work(_Job j, Uint8List frame) {
 
   final sharp = _laplacian(rgb, 256, 256);
   if (sharp < j.minSharpness) {
-    return LivenessResult(live: false, sharpness: sharp, reason: 'photo too blurry or dark (sharpness $sharp, needs ${j.minSharpness})');
+    return LivenessResult(
+        live: false, sharpness: sharp, cropScale: j.cropScale, reason: 'photo too blurry or dark (sharpness $sharp, needs ${j.minSharpness})');
   }
 
   final input = Float32List(256 * 256 * 3);
@@ -154,6 +156,7 @@ LivenessResult _work(_Job j, Uint8List frame) {
       live: live,
       score: score,
       sharpness: sharp,
+      cropScale: j.cropScale,
       reason: live ? null : 'looks like a photo or a screen (spoof score ${score.toStringAsFixed(2)}, must be below ${j.threshold})');
 }
 

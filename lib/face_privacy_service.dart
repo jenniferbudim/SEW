@@ -227,7 +227,9 @@ Future<UnprotectResult> _unprotect(Uint8List pngBytes, String pass) async {
   lap('decode');
   final n0 = m['n0'] as int;
   final faces = (m['faces'] as List).cast<Map<String, dynamic>>();
-  for (var i = 0; i < faces.length; i++) {
+  // Undo in REVERSE order: protect() encrypts face 0, then face 1, ... If two boxes overlap, face 1 was encrypted over
+  // pixels that face 0 had already changed, so face 1 must be undone first. (Boxes that do not overlap are unaffected.)
+  for (var i = faces.length - 1; i >= 0; i--) {
     final bb = faces[i]['bbox'] as Map<String, dynamic>;
     final box = FaceBox(bb['x1'] as int, bb['y1'] as int, bb['x2'] as int, bb['y2'] as int);
     await _decryptRegion(rgb, w, box, deriveFaceKeys(master, i, n0: n0),

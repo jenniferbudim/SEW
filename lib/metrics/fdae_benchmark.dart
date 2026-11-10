@@ -286,6 +286,18 @@ Map<String, double> analyseTrial(TrialInput t, {Map<String, Uint8List>? images})
       row['h_c${c}_$b'] = hc[b].toDouble();
     }
   }
+  // gray (ITU-R BT.601 luma, integer maths) histogram of the plain and the cipher face
+  {
+    final gp = List<int>.filled(256, 0), gc = List<int>.filled(256, 0);
+    for (var i = 0; i < pc[0].length; i++) {
+      gp[(299 * pc[0][i] + 587 * pc[1][i] + 114 * pc[2][i] + 500) ~/ 1000]++;
+      gc[(299 * ec[0][i] + 587 * ec[1][i] + 114 * ec[2][i] + 500) ~/ 1000]++;
+    }
+    for (var b = 0; b < 256; b++) {
+      row['h_pg_$b'] = gp[b].toDouble();
+      row['h_cg_$b'] = gc[b].toDouble();
+    }
+  }
 
   // ---- histogram analysis: chi-square vs uniform (critical value for p = 0.05, 255 dof = 293.2478) ----
   final chiP = [for (final c in pc) chi2Uniform(c)];

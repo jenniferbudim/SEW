@@ -106,13 +106,16 @@ class _SignInPageState extends State<SignInPage> {
       return '\nFace login is disabled after ${st.fails} failed attempts in a row. Sign in with your password.';
     }
     if (st.locked) return '\n${st.fails} failed in a row. Locked for ${st.secondsLeft} s.';
-    return '\n${st.fails} of ${AttemptLimiter.freeTries} free attempts used.';
+    return '\n${st.fails} of ${AttemptLimiter.freeTries} attempts are used.';
   }
 
   LivenessResult? _lastLive(FaceAuthService? svc) {
     final lv = svc?.liveness;
     return lv is TfliteLiveness ? lv.last : null;
   }
+
+  /// liveMode column of the log: "logOnly|crop1.4" (mode | liveness crop scale used for that attempt).
+  String _liveModeLabel(LivenessResult? l) => '${kLivenessMode.name}|crop${l?.cropScale ?? liveCropScale}';
 
   Future<String?> _onConfirm(Uint8List jpeg) async {
     final u = FirebaseAuth.instance.currentUser;
@@ -147,7 +150,7 @@ class _SignInPageState extends State<SignInPage> {
           liveScore: live?.score,
           sharpness: live?.sharpness,
           liveVerdict: live?.verdict,
-          liveMode: kLivenessMode.name);
+          liveMode: _liveModeLabel(live));
       if (kCalibrating) {
         return 'Calibration mode: login is switched off while the match threshold is being set.'
             '${score?.score != null ? "\nScore ${score!.score!.toStringAsFixed(3)}" : ""}';
@@ -174,9 +177,10 @@ class _SignInPageState extends State<SignInPage> {
           liveScore: live?.score,
           sharpness: live?.sharpness,
           liveVerdict: live?.verdict ?? 'error',
-          liveMode: kLivenessMode.name);
+          liveMode: _liveModeLabel(live));
       final more = await _fail(limiter);
-      return 'Liveness check failed${live?.reason != null ? ": ${live!.reason}" : "."}$more';
+      // the technical reason (spoof score, sharpness) is in the score log, not shown to the user
+      return 'Please take another picture$more';
     } on FaceAuthException catch (e) {
       // no face / several faces / face too small: not an authentication attempt, so it is not counted as a failure
       logScore(event: 'verify', label: _label, accepted: false, threshold: kMatchThreshold, error: '$e');
@@ -212,6 +216,14 @@ class _SignInPageState extends State<SignInPage> {
               decoration: const InputDecoration(hintText: 'Tester name or code (optional, e.g. B)', isDense: true),
               onChanged: (_) => setState(() {}),
             ),
+          Row(children: [
+            const Text('Liveness crop: ', style: TextStyle(fontSize: 13)),
+            DropdownButton<double>(
+              value: liveCropScale,
+              items: [for (final v in kLiveCropScales) DropdownMenuItem(value: v, child: Text('x$v'))],
+              onChanged: (v) => setState(() => liveCropScale = v ?? kLiveCropScale),
+            ),
+          ]),
           Text('Logged as: $_label', style: const TextStyle(fontSize: 12)),
         ]),
       );

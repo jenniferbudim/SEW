@@ -20,11 +20,13 @@ class _ConsentPageState extends State<ConsentPage> {
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const RegisterFacePage()));
   }
 
-  Widget _row(IconData i, String title, String body) => Padding(
+  Widget _row(int n, String title, String body) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(i, color: kIconColor),
-          const SizedBox(width: 12),
+          SizedBox(
+              width: 24,
+              child: Text('$n.', style: const TextStyle(fontWeight: FontWeight.w700, color: kPlum))),
+          const SizedBox(width: 8),
           Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, style: const TextStyle(fontWeight: FontWeight.w700, color: kPlum)),
@@ -42,18 +44,18 @@ class _ConsentPageState extends State<ConsentPage> {
             Expanded(
               child: SingleChildScrollView(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _row(Icons.photo_camera_outlined, 'What is stored',
+                  _row(1, 'What is stored',
                       'Three small face crops (112 x 112 px) taken now, kept only in encrypted form, plus the numeric '
                       'face template used for matching. Your full photos are not stored.'),
-                  _row(Icons.cloud_outlined, 'Where',
+                  _row(2, 'Where',
                       'In the cloud database (Firebase), under your account only. The encryption key is held by a '
                       'separate key service and is never saved with the data.'),
-                  _row(Icons.lock_outline, 'What it is used for',
+                  _row(3, 'What it is used for',
                       'Only to check that the person signing in is you. Nothing else, and it is not shared.'),
-                  _row(Icons.delete_outline, 'You stay in control',
+                  _row(4, 'You stay in control',
                       'Press Delete on the dashboard at any time to remove your face data. Face login then stops '
                       'working until you register again. Signing in with your password does not need your face.'),
-                  _row(Icons.info_outline, 'Be aware',
+                  _row(5, 'Be aware',
                       'Face matching is not perfect: it can wrongly reject you, and rarely accept someone who looks '
                       'very similar. Too many failed attempts temporarily lock face login.'),
                   const SizedBox(height: 8),
