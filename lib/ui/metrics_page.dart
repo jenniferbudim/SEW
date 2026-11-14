@@ -164,20 +164,20 @@ class _MetricsPageState extends State<MetricsPage> {
   String _status = 'Take one photo per trial, or upload a ZIP of photos. For the thesis use about 30 different photos '
       '(different pose, light, distance), like the 30 trials of the PC benchmark.';
 
-  /// Protect + restore + measure ONE photo and store the result. Throws on an unreadable photo.
+  /// Encrypt + decrypt + measure ONE photo and store the result. Throws on an unreadable photo.
   /// Returns whether the trial was counted, and a message.
   Future<({bool counted, String message})> _runTrial(Uint8List photo, String source,
       {required String ext, required Uint8List model, required FacePrivacyService svc, String? label}) async {
     final tag = label ?? 'Trial ${_rows.length + 1}';
     final rssBefore = ProcessInfo.currentRss;
     final wall = Stopwatch()..start();
-    final p = await svc.protect(photo, _secret);
+    final p = await svc.encrypt(photo, _secret);
     if (p.faces.isEmpty) {
       _skipped++;
       _skippedNames.add('$source: no face found');
       return (counted: false, message: 'No face found in that photo, so the trial was skipped (not counted).');
     }
-    final u = await svc.unprotect(p.png, _secret);
+    final u = await svc.decrypt(p.png, _secret);
     final wallMs = wall.elapsedMilliseconds;
     if (mounted) setState(() => _status = '$tag: measuring NPCR, entropy, key sensitivity ... (can take up to a minute)');
     final res = await runAnalysisWithImages(TrialInput(

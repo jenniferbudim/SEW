@@ -7,7 +7,7 @@ import 'firestore_face_store.dart';
 import 'key_provider.dart';
 
 /// Free key service: POSTs the user's Firebase ID token to the Cloudflare Worker (worker/), which verifies it and
-/// returns that user's key. The key lives in memory only; it is never written to the phone's disk.
+/// returns that user's key. The key lives in memory only; it is never written to the phone's disk
 class WorkerKeyProvider implements KeyProvider {
   WorkerKeyProvider._();
   static final instance = WorkerKeyProvider._();
@@ -45,7 +45,7 @@ class WorkerKeyProvider implements KeyProvider {
     _uid = null;
   }
 
-  /// The Worker is stateless (it stores nothing), so deleting means deleting the encrypted template in Firestore.
+  /// Delete encrypted template in Firestore
   @override
   Future<void> deleteMyFaceData() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;

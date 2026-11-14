@@ -13,7 +13,7 @@ class FirestoreFaceStore implements FaceStore {
 
   @override
   Future<void> save(EnrolledUser u) => _ref(u.id).set({
-        'record': Blob(u.toBytes()), // ~150 KB for 3 samples; Firestore's limit is 1 MiB per document
+        'record': Blob(u.toBytes()), 
         'v': 1,
         'updatedAt': FieldValue.serverTimestamp(),
       });

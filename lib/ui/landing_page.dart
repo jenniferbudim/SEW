@@ -12,7 +12,7 @@ class LandingPage extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const AppLogo(height: 220),
               const SizedBox(height: 12),
-              const Text('Secure\nEncrypted\nVerification',
+              const Text('Sistem\nEnkripsi\nWajah',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: kPlum, fontSize: 18, fontWeight: FontWeight.w800, height: 1.3, letterSpacing: 1)),
               const SizedBox(height: 48),

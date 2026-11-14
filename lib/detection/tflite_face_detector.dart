@@ -4,7 +4,7 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'face_box.dart';
 import 'yolo_decode.dart';
 
-enum DetectorKind { yolo26, yolo26pose, yolov7 }
+enum DetectorKind { yolo26, yolo26pose, yolov7 } 
 
 /// Synchronous detector -- construct and call it INSIDE a background isolate
 /// (FacePrivacyService does this) so the UI thread never blocks.
@@ -43,8 +43,6 @@ class TfliteFaceDetector {
     final f = Uint8List.fromList(outT.data).buffer.asFloat32List(); // aligned copy
     final shape = outT.shape;
 
-    // Trust the model file, not the setting: a pose model ([1,20,N] or [1,N,20]) must never be read as the plain
-    // 6-column box format just because an old config still says `yolo26` (and vice versa).
     final dims = shape.sublist(shape.length - 2);
     final DetectorKind effective = kind == DetectorKind.yolov7
         ? kind

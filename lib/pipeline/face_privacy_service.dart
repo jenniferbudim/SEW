@@ -19,8 +19,8 @@ class NoManifestException implements Exception {
   String toString() => 'No FDAE manifest found in this PNG (was it re-encoded or stripped?).';
 }
 
-class ProtectResult {
-  ProtectResult(this.png, this.faces, this.timingsMs);
+class EncryptResult {
+  EncryptResult(this.png, this.faces, this.timingsMs);
   final Uint8List png; // lossless PNG with the manifest embedded (tEXt "fdae")
   final List<FaceBox> faces;
 
@@ -30,46 +30,47 @@ class ProtectResult {
 
   /// Single-image throughput of the compute stages only (detect + encrypt).
   /// For a LIVE camera preview use detect-only FPS: 1000 / timingsMs['detect'].
-  double get protectFps => 1000.0 / (timingsMs['detect']! + timingsMs['encrypt']!).clamp(1, 1 << 30);
+  double get encryptFps => 1000.0 / (timingsMs['detect']! + timingsMs['encrypt']!).clamp(1, 1 << 30);
   double get detectFps => 1000.0 / timingsMs['detect']!.clamp(1, 1 << 30);
 }
 
-class UnprotectResult {
-  UnprotectResult(this.png, this.timingsMs);
+class DecryptResult {
+  DecryptResult(this.png, this.timingsMs);
   final Uint8List png;
 
   /// decode, kdf, decrypt (all faces), png_encode, total -- milliseconds.
   final Map<String, int> timingsMs;
 }
 
-/// Entry point for the app. Everything heavy runs in a background isolate.
+/// Entry point 
+/// Everything heavy runs in a background isolate
 class FacePrivacyService {
   FacePrivacyService({
     required this.modelBytes,
     this.kind = DetectorKind.yolo26,
     this.n0 = 1000,
     this.pbkdf2Iterations = kPbkdf2Iterations,
-    this.confThreshold, // null = detector default (0.3 YOLO26 / 0.4 YOLOv7)
+    this.confThreshold, 
   });
 
-  final Uint8List modelBytes; // rootBundle.load(...) -> buffer.asUint8List()
+  final Uint8List modelBytes;
   final DetectorKind kind;
   final int n0;
   final int pbkdf2Iterations;
   final double? confThreshold;
 
-  /// Decode -> detect -> encrypt face boxes -> lossless PNG (+manifest).
-  Future<ProtectResult> protect(Uint8List imageFileBytes, String passphrase) {
+  /// Decode -> detect -> encrypt face boxes -> lossless PNG 
+  Future<EncryptResult> encrypt(Uint8List imageFileBytes, String passphrase) {
     final model = modelBytes, k = kind, n = n0, it = pbkdf2Iterations, conf = confThreshold;
-    return Isolate.run(() => _protect(imageFileBytes, passphrase, model, k, n, it, conf));
+    return Isolate.run(() => _encrypt(imageFileBytes, passphrase, model, k, n, it, conf));
   }
 
   /// Read manifest from PNG, re-derive keys, restore the original pixels.
-  Future<UnprotectResult> unprotect(Uint8List protectedPng, String passphrase) =>
-      Isolate.run(() => _unprotect(protectedPng, passphrase));
+  Future<DecryptResult> decrypt(Uint8List protectedPng, String passphrase) =>
+      Isolate.run(() => _decrypt(protectedPng, passphrase));
 }
 
-// ------------------------------------------------------------------ helpers
+// Helpers
 img.Image _toRgb8(img.Image im) =>
     im.numChannels == 3 && im.format == img.Format.uint8
         ? im
@@ -99,9 +100,6 @@ void _writeBack(Uint8List rgb, int imgW, FaceBox b, int c, Uint8List src) {
   }
 }
 
-/// R, G and B of a face box are independent given the same key material
-/// (as in pipeline_test.py), so the three channels run in parallel isolates.
-/// Output is byte-identical to the sequential version; ivBit is per channel.
 Future<Map<String, int>> _encryptRegion(Uint8List rgb, int imgW, FaceBox b, FdaeKeys keys) async {
   const names = ['R', 'G', 'B'];
   final cts = await Future.wait([
@@ -133,9 +131,6 @@ Uint8List _encodePng(Uint8List rgb, int w, int h) {
   return img.encodePng(im, level: 3);
 }
 
-/// Drops a box that is (almost) completely inside a larger box: the larger box already hides that region, and
-/// encrypting the inner one on top of it only adds work. Partly overlapping boxes are kept; _unprotect undoes them
-/// in reverse order so those restore exactly.
 List<FaceBox> _dropNested(List<FaceBox> f) {
   int area(FaceBox b) => b.width * b.height;
   bool inside(FaceBox s, FaceBox big) {
@@ -157,8 +152,8 @@ List<FaceBox> _dropNested(List<FaceBox> f) {
   return out;
 }
 
-// ------------------------------------------------------------------ protect
-Future<ProtectResult> _protect(Uint8List fileBytes, String pass, Uint8List model,
+// Encrypt
+Future<EncryptResult> _encrypt(Uint8List fileBytes, String pass, Uint8List model,
     DetectorKind kind, int n0, int iterations, double? conf) async {
   final total = Stopwatch()..start();
   final sw = Stopwatch()..start();
@@ -215,11 +210,11 @@ Future<ProtectResult> _protect(Uint8List fileBytes, String pass, Uint8List model
       _encodePng(rgb, w, h), 'fdae', base64.encode(utf8.encode(jsonEncode(manifest))));
   lap('png_encode');
   t['total'] = total.elapsedMilliseconds;
-  return ProtectResult(png, faces, t);
+  return EncryptResult(png, faces, t);
 }
 
-// ------------------------------------------------------------------ unprotect
-Future<UnprotectResult> _unprotect(Uint8List pngBytes, String pass) async {
+// Decrypt
+Future<DecryptResult> _decrypt(Uint8List pngBytes, String pass) async {
   final total = Stopwatch()..start();
   final sw = Stopwatch()..start();
   final t = <String, int>{};
@@ -252,8 +247,7 @@ Future<UnprotectResult> _unprotect(Uint8List pngBytes, String pass) async {
   lap('decode');
   final n0 = m['n0'] as int;
   final faces = (m['faces'] as List).cast<Map<String, dynamic>>();
-  // Undo in REVERSE order: protect() encrypts face 0, then face 1, ... If two boxes overlap, face 1 was encrypted over
-  // pixels that face 0 had already changed, so face 1 must be undone first. (Boxes that do not overlap are unaffected.)
+
   for (var i = faces.length - 1; i >= 0; i--) {
     final bb = faces[i]['bbox'] as Map<String, dynamic>;
     final box = FaceBox(bb['x1'] as int, bb['y1'] as int, bb['x2'] as int, bb['y2'] as int);
@@ -264,5 +258,5 @@ Future<UnprotectResult> _unprotect(Uint8List pngBytes, String pass) async {
   final out = _encodePng(rgb, w, h); // manifest chunk intentionally dropped
   lap('png_encode');
   t['total'] = total.elapsedMilliseconds;
-  return UnprotectResult(out, t);
+  return DecryptResult(out, t);
 }

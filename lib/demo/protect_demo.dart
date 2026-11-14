@@ -71,7 +71,7 @@ class _DemoState extends State<ProtectDemo> {
     final photo = await captureFromCamera(context, front:true);
     if (photo == null || !mounted) return;
     await _run(() async {
-      final r = await (await _service()).protect(photo, await _secret());
+      final r = await (await _service()).encrypt(photo, await _secret());
       final f = await _savedFile();
       await f.writeAsBytes(r.png);
       _protectedPng = r.png;
@@ -79,7 +79,7 @@ class _DemoState extends State<ProtectDemo> {
       _showingRestored = false;
       _status = '${r.faces.length} face(s) encrypted. Saved ${f.path}\n'
           'timings ms: ${r.timingsMs}\n'
-          'detect FPS ${r.detectFps.toStringAsFixed(1)} | protect FPS ${r.protectFps.toStringAsFixed(2)}';
+          'detect FPS ${r.detectFps.toStringAsFixed(1)} | protect FPS ${r.encryptFps.toStringAsFixed(2)}';
     });
   }
 
@@ -94,7 +94,7 @@ class _DemoState extends State<ProtectDemo> {
     if (src == null) return setState(() => _status = 'Nothing to restore yet: take a photo and protect it first.');
     final png = src;
     await _run(() async {
-      final r = await (await _service()).unprotect(png, await _secret());
+      final r = await (await _service()).decrypt(png, await _secret());
       _protectedPng = png;
       _shown = r.png;
       _showingRestored = true;

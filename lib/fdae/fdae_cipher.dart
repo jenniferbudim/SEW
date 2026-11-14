@@ -39,7 +39,7 @@ class FdaeCiphertext {
   final int ivBit; // A11(1); must travel with the ciphertext
 }
 
-// ------------------------------------------------------------ chaotic maps
+// Chaotic maps
 class _Pwlcm {
   _Pwlcm(double x0, this._p, int n0) : _x = x0 {
     if (!(x0 > 0.0 && x0 < 1.0)) throw ArgumentError('x0 must be in (0,1)');
@@ -157,7 +157,7 @@ int _sum(Uint8List a) {
   return (v, w);
 }
 
-// ------------------------------------------------------------ encrypt
+// Encrypt
 FdaeCiphertext fdaeEncrypt(Uint8List gray, int h, int w, FdaeKeys k) {
   final hw = h * w;
   if (gray.length != hw) throw ArgumentError('gray.length != h*w');
@@ -168,7 +168,7 @@ FdaeCiphertext fdaeEncrypt(Uint8List gray, int h, int w, FdaeKeys k) {
   final b1 = _keystream(_Pwlcm(k.x0, k.mu1, k.n0).next, hw);
   final b2 = _keystream(_Logistic(k.z0, k.r, k.n0).next, hw);
 
-  // diffusion, eqs (6)-(8)
+  // Diffusion, eqs (6)-(8)
   final shift = _sum(a2) % L;
   final a11 = Uint8List(L);
   for (var j = 0; j < L; j++) {
@@ -192,7 +192,7 @@ FdaeCiphertext fdaeEncrypt(Uint8List gray, int h, int w, FdaeKeys k) {
     total += a22[i] + b11[i]; // eq(11)
   }
 
-  // confusion, eqs (17)-(22)
+  // Confusion, eqs (17)-(22)
   final (v, wv) = _confusionIndices(k, total, L);
   for (var i = 0; i < L; i++) {
     final vi = v[i];
@@ -210,7 +210,7 @@ FdaeCiphertext fdaeEncrypt(Uint8List gray, int h, int w, FdaeKeys k) {
   return FdaeCiphertext(_recompose(b11, a22, hw), iv);
 }
 
-// ------------------------------------------------------------ decrypt
+// Decrypt
 Uint8List fdaeDecrypt(FdaeCiphertext ct, int h, int w, FdaeKeys k) {
   final hw = h * w;
   if (ct.image.length != hw) throw ArgumentError('image.length != h*w');
