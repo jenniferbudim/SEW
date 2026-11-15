@@ -228,7 +228,7 @@ class _MetricsPageState extends State<MetricsPage> {
 
   Future<void> _trial() async {
     final photo = await captureFromCamera(context,
-        front: true, title: 'Trial ${_rows.length + 1}', hint: 'Change pose, light or distance for every trial.');
+        front: true, panelStyle: true, title: 'Trial ${_rows.length + 1}', hint: 'Change pose, light or distance for every trial.');
     if (photo == null || !mounted) return;
     setState(() {
       _busy = true;
@@ -339,13 +339,6 @@ class _MetricsPageState extends State<MetricsPage> {
     return out;
   }
 
-  Map<String, dynamic> _device() => {
-        'build_mode': kReleaseMode ? 'release' : (kProfileMode ? 'profile' : 'debug'),
-        'os': Platform.operatingSystemVersion,
-        'cpu_cores': Platform.numberOfProcessors,
-        'dart': Platform.version,
-      };
-
   String _csv() {
     final keys = [for (final g in _groups) for (final m in g.$2) m.key, ..._extraCsv];
     final b = StringBuffer('trial,${keys.join(',')},source\n');
@@ -378,7 +371,6 @@ class _MetricsPageState extends State<MetricsPage> {
       ];
 
   String _json() => const JsonEncoder.withIndent('  ').convert(_clean({
-        'device': _device(),
         'config': {
           'detector_asset': kDetectorAsset,
           'detector_kind': kDetectorKind.name,
@@ -565,20 +557,8 @@ class _MetricsPageState extends State<MetricsPage> {
               child: const Text('Clear')),
         ]),
         if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
-        const SizedBox(height: 12),
-        Text(
-            'Theoretical key space: 2^${theoreticalKeyspaceLog2().toStringAsFixed(1)} '
-            '(six parameters, precision 1e-15; the burn-in length is not counted as secret).\n'
-            'Complexity (analytic): cipher time and memory are Θ(N) in the N pixels of a face (bit-plane XOR, two chaotic '
-            'streams of N values, 8N permutation indices); the burn-in is a constant; key derivation is Θ(rounds), once per '
-            'photo. Detection is constant per frame after letterboxing (fixed model input) plus Θ(W·H) decode and resize.\n'
-            'Detector model complexity (parameters, GFLOPs) comes from the training side: run YOLO(best.pt).info() in Colab.\n'
-            'AP needs ground-truth boxes, so it is not measured here: use evaluation_suite.py --annotations on WIDER FACE.',
-            style: small),
         if (_rows.isNotEmpty) ...[const SizedBox(height: 12), _summaryTable()],
         if (_scaling != null) ...[const SizedBox(height: 16), const Text('Scaling', style: TextStyle(color: kPlum, fontWeight: FontWeight.w700)), const SizedBox(height: 4), _scalingTable()],
-        const SizedBox(height: 12),
-        Text('${_device()}', style: const TextStyle(fontSize: 10, color: Colors.black54)),
       ]),
     );
   }

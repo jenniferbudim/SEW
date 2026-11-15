@@ -6,8 +6,7 @@ import 'yolo_decode.dart';
 
 enum DetectorKind { yolo26, yolo26pose, yolov7 } 
 
-/// Synchronous detector -- construct and call it INSIDE a background isolate
-/// (FacePrivacyService does this) so the UI thread never blocks.
+/// Synchronous detector 
 class TfliteFaceDetector {
   TfliteFaceDetector.fromBuffer(
     Uint8List modelBytes, {
@@ -31,7 +30,6 @@ class TfliteFaceDetector {
   late final bool _nchw;
   late final int _size;
 
-  /// [rgb] must be orientation-baked, 3-channel uint8.
   List<FaceBox> detect(img.Image rgb) {
     final lb = letterbox(rgb, _size);
     final blob = _nchw ? hwcToChw(lb.blobHwc, _size) : lb.blobHwc;

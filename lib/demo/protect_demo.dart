@@ -3,11 +3,15 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import '../camera_capture.dart';
 import '../cloud/key_service.dart';
 import '../face_config.dart';
 import '../face_privacy.dart';
+import '../ui/face_photo_panel.dart';
 
+/// Encrypt Photo Demo. Same screen as the face sign-in (live preview, shutter + flip inside the box), but the two
+/// buttons are Encrypt and Decrypt instead of Retake and Confirm.
+/// Take a photo, press Encrypt to scramble the faces in it, press Decrypt to get them back.
+/// The camera icon that shows on the photo (bottom right) goes back to the live preview for a new photo.
 class ProtectDemo extends StatefulWidget {
   const ProtectDemo({super.key});
   @override
@@ -31,11 +35,9 @@ class _DemoState extends State<ProtectDemo> {
   }
 
   FacePrivacyService? _svc;
-  Uint8List? _shown; // what is on screen right now
-  Uint8List? _protectedPng; // the last encrypted result, kept for Restore
-  bool _showingRestored = false;
-  String _status = 'Tap "Take photo & protect".';
-  bool _busy = false;
+  Uint8List? _shown; // encrypted / decrypted result shown in the box (null = show the photo that was taken)
+  Uint8List? _protectedPng; // the last encrypted result, kept for Decrypt
+  String? _info; // "Face(s) encrypted: 1 / Total time taken: 2266 ms"
 
   Future<FacePrivacyService> _service() async => _svc ??= FacePrivacyService(
       modelBytes: (await rootBundle.load(_modelAsset)).buffer.asUint8List(),
@@ -47,58 +49,54 @@ class _DemoState extends State<ProtectDemo> {
   Future<File> _savedFile() async =>
       File('${(await getApplicationDocumentsDirectory()).path}/protected.png');
 
-  Future<void> _run(Future<void> Function() job) async {
-    setState(() {
-      _busy = true;
-      _status = 'Working...';
-    });
-    final sw = Stopwatch()..start();
+  /// Runs [job]; returns the error text for the panel to show, or null when it worked.
+  Future<String?> _run(Future<void> Function() job) async {
     try {
       await job();
-      _status = '$_status\nwall ${sw.elapsedMilliseconds} ms';
+      return null;
     } on WrongPassphraseException {
-      _status = 'Cannot decrypt: this photo was protected by a different account (or the key changed).';
+      return 'Cannot decrypt: this photo was protected by a different account (or the key changed).';
     } on NoManifestException catch (e) {
-      _status = e.toString();
+      return e.toString();
     } catch (e) {
-      _status = 'Failed: $e';
+      return 'Failed: $e';
     }
-    if (mounted) setState(() => _busy = false);
   }
 
-  /// Live camera -> detect faces -> encrypt them -> keep + save the encrypted PNG.
-  Future<void> _protect() async {
-    final photo = await captureFromCamera(context, front:true);
-    if (photo == null || !mounted) return;
-    await _run(() async {
+  /// Photo taken in the box -> detect faces -> encrypt them -> keep + save the encrypted PNG.
+  Future<String?> _encrypt(Uint8List? photo) async {
+    if (photo == null) return 'Take a photo first.';
+    return _run(() async {
       final r = await (await _service()).encrypt(photo, await _secret());
-      final f = await _savedFile();
-      await f.writeAsBytes(r.png);
-      _protectedPng = r.png;
-      _shown = r.png;
-      _showingRestored = false;
-      _status = '${r.faces.length} face(s) encrypted. Saved ${f.path}\n'
-          'timings ms: ${r.timingsMs}\n'
-          'detect FPS ${r.detectFps.toStringAsFixed(1)} | protect FPS ${r.encryptFps.toStringAsFixed(2)}';
+      await (await _savedFile()).writeAsBytes(r.png);
+      if (!mounted) return;
+      setState(() {
+        _protectedPng = r.png;
+        _shown = r.png;
+        _info = 'Face(s) encrypted: ${r.faces.length}\n'
+            'Total time taken: ${r.timingsMs['total']} ms';
+      });
     });
   }
 
-  /// Decrypts the picture that was just protected (memory, or the saved file
-  /// if the app was restarted). No photo picker involved.
-  Future<void> _restore() async {
+  /// Decrypts the picture that was just encrypted (memory, or the saved file if the app was restarted).
+  Future<String?> _decrypt(Uint8List? _) async {
     Uint8List? src = _protectedPng;
     if (src == null) {
       final f = await _savedFile();
       if (await f.exists()) src = await f.readAsBytes();
     }
-    if (src == null) return setState(() => _status = 'Nothing to restore yet: take a photo and protect it first.');
+    if (src == null) return 'Nothing to decrypt yet: take a photo and encrypt it first.';
     final png = src;
-    await _run(() async {
+    return _run(() async {
       final r = await (await _service()).decrypt(png, await _secret());
-      _protectedPng = png;
-      _shown = r.png;
-      _showingRestored = true;
-      _status = 'Restored. timings ms: ${r.timingsMs}';
+      if (!mounted) return;
+      setState(() {
+        _protectedPng = png;
+        _shown = r.png;
+        _info = 'Face(s) decrypted: ${r.faceCount}\n'
+            'Total time taken: ${r.timingsMs['total']} ms';
+      });
     });
   }
 
@@ -106,26 +104,17 @@ class _DemoState extends State<ProtectDemo> {
   Widget build(BuildContext c) => Scaffold(
         appBar: AppBar(title: const Text('Encrypt Photo Demo')),
         body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-              FilledButton.icon(
-                  onPressed: _busy ? null : _protect,
-                  label: const Text('Encrypt')),
-              OutlinedButton(
-                  onPressed: _busy ? null : _restore, child: const Text('Decrypt')),
-            ]),
-            if (_showingRestored && _protectedPng != null)
-              TextButton(
-                  onPressed: () => setState(() {
-                        _shown = _protectedPng;
-                        _showingRestored = false;
-                      }),
-                  child: const Text('Show encrypted version again')),
-            if (_busy) const LinearProgressIndicator(),
-            Text(_status),
-            Expanded(child: _shown == null ? const SizedBox() : Image.memory(_shown!)),
-          ]),
+          padding: const EdgeInsets.fromLTRB(28, 4, 28, 24),
+          child: FacePhotoPanel(
+            leftAction: PanelAction('Encrypt', _encrypt),
+            rightAction: PanelAction('Decrypt', _decrypt),
+            shownImage: _shown,
+            info: _info,
+            onBackToCamera: () => setState(() {
+              _shown = null;
+              _info = null;
+            }),
+          ),
         ),
       );
 }

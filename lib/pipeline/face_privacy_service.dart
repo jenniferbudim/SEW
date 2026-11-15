@@ -35,8 +35,11 @@ class EncryptResult {
 }
 
 class DecryptResult {
-  DecryptResult(this.png, this.timingsMs);
+  DecryptResult(this.png, this.timingsMs, {this.faceCount = 0});
   final Uint8List png;
+
+  /// How many encrypted faces were restored.
+  final int faceCount;
 
   /// decode, kdf, decrypt (all faces), png_encode, total -- milliseconds.
   final Map<String, int> timingsMs;
@@ -258,5 +261,5 @@ Future<DecryptResult> _decrypt(Uint8List pngBytes, String pass) async {
   final out = _encodePng(rgb, w, h); // manifest chunk intentionally dropped
   lap('png_encode');
   t['total'] = total.elapsedMilliseconds;
-  return DecryptResult(out, t);
+  return DecryptResult(out, t, faceCount: faces.length);
 }

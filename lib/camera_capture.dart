@@ -1,21 +1,23 @@
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'ui/app_theme.dart' show SvgIcon;
+import 'ui/app_theme.dart' show SvgIcon, kPanel, kPlum;
 
 /// Opens a LIVE camera preview and returns the JPEG bytes of the photo taken
 /// when the user presses the shutter, or null if they back out.
 /// [front] only chooses which camera opens FIRST; the user can flip between
 /// front and back with the switch button (shown when the device has both).
 /// [title]/[hint] let a multi-photo flow say which photo this is ("Photo 2 of 3").
+/// [panelStyle] uses the same look as the Sign In photo step (grey box, shutter + flip icons inside it, no buttons).
 Future<Uint8List?> captureFromCamera(BuildContext context,
-        {bool front = false, String? title, String? hint}) =>
-    Navigator.of(context).push<Uint8List>(
-        MaterialPageRoute(builder: (_) => CameraCaptureScreen(front: front, title: title, hint: hint)));
+        {bool front = false, String? title, String? hint, bool panelStyle = false}) =>
+    Navigator.of(context).push<Uint8List>(MaterialPageRoute(
+        builder: (_) => CameraCaptureScreen(front: front, title: title, hint: hint, panelStyle: panelStyle)));
 
 class CameraCaptureScreen extends StatefulWidget {
-  const CameraCaptureScreen({super.key, this.front = false, this.title, this.hint});
+  const CameraCaptureScreen({super.key, this.front = false, this.title, this.hint, this.panelStyle = false});
   final bool front;
+  final bool panelStyle;
   final String? title, hint;
   @override
   State<CameraCaptureScreen> createState() => _CameraCaptureScreenState();
@@ -166,8 +168,85 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> with WidgetsB
     super.dispose();
   }
 
+  /// Sign In look: caption, grey box with the live preview, shutter + flip inside the box at the bottom right.
+  Widget _panelBody() {
+    final c = _c;
+    Widget preview;
+    if (_error != null) {
+      preview = Center(
+          child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(_error!, textAlign: TextAlign.center, maxLines: 6, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 12),
+                OutlinedButton(onPressed: _retry, child: const Text('Try again')),
+              ])));
+    } else if (c == null || !c.value.isInitialized) {
+      preview = const Center(child: CircularProgressIndicator());
+    } else {
+      final ps = c.value.previewSize!; // landscape size; the portrait preview swaps the sides
+      preview = ClipRect(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(width: ps.height, height: ps.width, child: CameraPreview(c)),
+        ),
+      );
+    }
+    final ready = c != null && _error == null && c.value.isInitialized;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 4, 28, 24),
+      child: Column(children: [
+        if (widget.hint != null)
+          Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(widget.hint!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: kPlum, fontSize: 16, fontWeight: FontWeight.w600))),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              color: kPanel,
+              width: double.infinity,
+              child: Stack(fit: StackFit.expand, children: [
+                preview,
+                if (ready || _busy || _switching)
+                  Positioned(
+                    right: 12,
+                    bottom: 12,
+                    child: Row(children: [
+                      InkResponse(
+                        onTap: (_busy || _switching) ? null : _capture,
+                        child: _busy
+                            ? const SizedBox(
+                                width: 60,
+                                height: 60,
+                                child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(strokeWidth: 3)))
+                            : const SvgIcon('camera', size: 60),
+                      ),
+                      if (_canSwitch)
+                        IconButton(
+                            tooltip: 'Switch camera',
+                            onPressed: (_busy || _switching) ? null : _switchCamera,
+                            icon: const SvgIcon('flip', size: 30)),
+                    ]),
+                  ),
+              ]),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (widget.panelStyle) {
+      return Scaffold(
+        appBar: AppBar(title: Text(widget.title ?? 'Take photo')),
+        body: _panelBody(),
+      );
+    }
     final c = _c;
     final ready = c != null && _error == null;
     return Scaffold(
