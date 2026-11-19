@@ -10,8 +10,6 @@ class FaceBox {
   int get width => x2 - x1;
   int get height => y2 - y1;
 
-  /// Grow by [fraction] of width/height on every side (forehead/chin/ears),
-  /// clipped to the image.
   FaceBox expanded(double fraction, int imgW, int imgH) {
     final dx = (width * fraction).round(), dy = (height * fraction).round();
     return FaceBox(

@@ -238,7 +238,7 @@ Uint8List _prepareChip(Uint8List frame, TfliteFaceDetector det, FaceAuthConfig c
   if (im.numChannels != 3 || im.format != img.Format.uint8) {
     im = im.convert(numChannels: 3, format: img.Format.uint8);
   }
-  final all = det.detect(im); // detector runs with a LOW floor so we can report how close a miss was
+  final all = det.detect(im); 
   final faces = _dedupe(all.where((f) => f.confidence >= cfg.minDetectionConf).toList());
   if (faces.isEmpty) {
     throw NoFaceException(all.isEmpty ? null : all.map((f) => f.confidence).reduce(math.max), cfg.minDetectionConf);

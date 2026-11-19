@@ -219,9 +219,9 @@ const _t975 = [
 
 class Summary {
   Summary(this.n, this.mean, this.std, this.min, this.max, this.ci95, this.infinite);
-  final int n; // finite values used
+  final int n; 
   final double mean, std, min, max, ci95; // ci95 = half-width of the 95% confidence interval of the mean
-  final int infinite; // values that were +infinity (e.g. PSNR of a lossless decryption), not averaged
+  final int infinite;
   Map<String, dynamic> toJson() =>
       {'n': n, 'mean': mean, 'std': std, 'min': min, 'max': max, 'ci95': ci95, 'infinite': infinite};
 }
@@ -238,5 +238,6 @@ Summary summarize(List<double> values) {
   }
   final std = n > 1 ? math.sqrt(ss / (n - 1)) : 0.0;
   final t = n < 2 ? double.nan : (n - 1 <= 30 ? _t975[n - 2] : 1.96);
+  // ci95 = t * std / sqrt(n)
   return Summary(n, mean, std, fin.reduce(math.min), fin.reduce(math.max), n < 2 ? double.nan : t * std / math.sqrt(n), inf);
 }

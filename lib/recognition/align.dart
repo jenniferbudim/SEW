@@ -8,7 +8,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import '../detection/face_box.dart';
 
-/// insightface `arcface_dst` (112x112), copied from insightface/utils/face_align.py.
+/// insightface `arcface_dst` (112x112)
 const arcfaceTemplate112 = <double>[
   38.2946, 51.6963, // left eye
   73.5318, 51.5014, // right eye

@@ -34,9 +34,6 @@ Uint8List keyCheck(Uint8List master) => Uint8List.fromList(
 
 FdaeKeys deriveFaceKeys(Uint8List master, int faceIndex, {int n0 = 1000}) {
   final prf = Hmac(sha256, master);
-  // Attempt 0 uses the original labels, so every key that was already good is unchanged. If its logistic (z0, r) pair
-  // is weak (periodic orbit, z0 has no effect), draw again with a '|retry<N>' label. Deterministic: the decrypt side
-  // makes the same choice. Probability of 64 weak draws in a row is negligible.
   for (var attempt = 0; attempt < 64; attempt++) {
     final raw = BytesBuilder();
     for (var c = 0; c < 2; c++) {

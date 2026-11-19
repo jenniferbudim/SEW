@@ -50,19 +50,19 @@ class _DashboardPageState extends State<DashboardPage> {
   void _toLanding() => Navigator.pushAndRemoveUntil(
       context, MaterialPageRoute(builder: (_) => const LandingPage()), (r) => false);
 
-  /// Log out: forget the key AND the account on this phone, so the next sign-in asks for email + password first.
+  /// Log out
   Future<void> _logout() async {
     try {
       keyProvider.clear();
     } catch (_) {}
-    await LogoutFlag.set(); // from now on the app insists on email + password, even if a session were left behind
+    await LogoutFlag.set(); 
     try {
       await FirebaseAuth.instance.signOut();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Log out failed: $e')));
       return;
     }
-    // signOut() returned, but check: if a user is still there, say so instead of silently going on
+    // signOut() returned
     if (FirebaseAuth.instance.currentUser != null) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Log out did not complete. Try again.')));
       return;
@@ -112,7 +112,6 @@ class _DashboardPageState extends State<DashboardPage> {
       }
       lines.value = List.of(out);
     }
-
     out.clear();
     await step('Account', () async => _user == null ? throw 'not signed in' : 'signed in as ${_user!.email}');
     await step('Key service', () async => 'connected (${(await keyProvider.getKey()).length}-byte key)');

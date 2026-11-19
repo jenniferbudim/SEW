@@ -70,7 +70,7 @@ class _Logistic {
   final double _mu;
   double _x;
   double next() {
-    _x = _mu * _x * (1 - _x); // (mu*x)*(1-x): same evaluation order as Python
+    _x = _mu * _x * (1 - _x); // (mu*x)*(1-x)
     return _x;
   }
 }
@@ -110,7 +110,7 @@ Uint8List _keystream(double Function() next, int n) {
   return out;
 }
 
-// ------------------------------------------------------------ bit planes
+// bit planes
 /// planes [lo, lo+4) of gray, plane 0 = MSB, flattened plane-major.
 Uint8List _planes(Uint8List gray, int lo, int hw) {
   final out = Uint8List(4 * hw);
@@ -168,7 +168,7 @@ FdaeCiphertext fdaeEncrypt(Uint8List gray, int h, int w, FdaeKeys k) {
   final b1 = _keystream(_Pwlcm(k.x0, k.mu1, k.n0).next, hw);
   final b2 = _keystream(_Logistic(k.z0, k.r, k.n0).next, hw);
 
-  // Diffusion, eqs (6)-(8)
+  // Diffusion
   final shift = _sum(a2) % L;
   final a11 = Uint8List(L);
   for (var j = 0; j < L; j++) {
@@ -183,16 +183,16 @@ FdaeCiphertext fdaeEncrypt(Uint8List gray, int h, int w, FdaeKeys k) {
   }
   final iv = a11[0];
 
-  // DNA-XOR eqs (9)-(10)  ==  bitwise XOR (see library note)
+  // DNA-XOR ==  bitwise XOR 
   final a22 = Uint8List(L), b11 = Uint8List(L);
   var total = 0;
   for (var i = 0; i < L; i++) {
     a22[i] = a2[i] ^ b2[i];
     b11[i] = bb1[i] ^ b2[i];
-    total += a22[i] + b11[i]; // eq(11)
+    total += a22[i] + b11[i]; 
   }
 
-  // Confusion, eqs (17)-(22)
+  // Confusion
   final (v, wv) = _confusionIndices(k, total, L);
   for (var i = 0; i < L; i++) {
     final vi = v[i];

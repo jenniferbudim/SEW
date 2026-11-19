@@ -57,6 +57,7 @@ class TfliteFaceEmbedder {
     for (final x in v) {
       n += x * x;
     }
+    // normalisasi L2
     final inv = 1.0 / math.sqrt(n + 1e-12);
     final out = Float32List(v.length);
     for (var i = 0; i < v.length; i++) {

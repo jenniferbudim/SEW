@@ -27,7 +27,7 @@ class _DemoState extends State<ProtectDemo> {
   // service), not from a fixed passphrase. It is already high-entropy, so stretching it adds nothing: 1 round.
   static const _kdfRounds = 1;
 
-  /// Needs a connection + login the first time per session (the key is then cached in memory only).
+  /// key is then cached in memory only after login
   Future<String> _secret() async {
     final key = await keyProvider.getKey();
     final hex = key.map((b) => b.toRadixString(16).padLeft(2, '0')).join();

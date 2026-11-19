@@ -36,7 +36,7 @@ class AttemptLimiter {
   static const _storage = FlutterSecureStorage();
   String get _key => 'faceFails|$userId';
 
-  /// Delay after the n-th consecutive failure.
+  /// Delay after consecutive failure
   static int delaySeconds(int n) {
     if (n < freeTries) return 0;
     final d = _baseDelaySeconds * (1 << (n - freeTries));

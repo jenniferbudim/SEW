@@ -169,7 +169,7 @@ Future<EncryptResult> _encrypt(Uint8List fileBytes, String pass, Uint8List model
 
   var decoded = img.decodeImage(fileBytes);
   if (decoded == null) throw const FormatException('Unsupported or corrupt image');
-  decoded = _toRgb8(img.bakeOrientation(decoded)); // EXIF rotation baked in FIRST
+  decoded = _toRgb8(img.bakeOrientation(decoded)); // EXIF rotation 
   final w = decoded.width, h = decoded.height;
   lap('decode');
 
